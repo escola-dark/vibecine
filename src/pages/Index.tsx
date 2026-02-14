@@ -2,101 +2,116 @@ import { useMemo } from 'react';
 import { DashboardHero } from '@/components/DashboardHero';
 import { ContentRow } from '@/components/ContentRow';
 import { StatsBar } from '@/components/StatsBar';
+import { HeroBanner } from '@/components/HeroBanner';
 import { useContent } from '@/contexts/ContentContext';
-import { CatalogLoading } from '@/components/CatalogLoading';
+
+const KNOWN_SERIES = [
+  'the last of us',
+  'house of the dragon',
+  'the boys',
+  'stranger things',
+  'invincible',
+  'loki',
+  'the bear',
+  'bridgerton',
+  'wednesday',
+  'fallout',
+  'reacher',
+  'dark',
+  'breaking bad',
+  'silo',
+  'the walking dead',
+];
+
+const getYearFromTitle = (title: string) => {
+  const match = title.match(/(?:19|20)\d{2}/g);
+  if (!match || match.length === 0) return null;
+  return Number(match[match.length - 1]);
+};
+
+const byNewestYear = (a: { title: string }, b: { title: string }) => {
+  const ay = getYearFromTitle(a.title) ?? 0;
+  const by = getYearFromTitle(b.title) ?? 0;
+  return by - ay;
+};
 
 const Index = () => {
-  const { catalog, favorites, isBootstrapping, isLoading } = useContent();
+  const { catalog, favorites } = useContent();
 
   const moviesByGroup = useMemo(() => {
     const map = new Map<string, typeof catalog.movies>();
-    catalog.movies.forEach(m => {
+    catalog.movies.forEach((m) => {
       if (!map.has(m.group)) map.set(m.group, []);
       map.get(m.group)!.push(m);
     });
     return [...map.entries()].sort((a, b) => b[1].length - a[1].length);
   }, [catalog.movies]);
 
-  const trending = useMemo(() => {
-    return [...catalog.movies].sort(() => Math.random() - 0.5).slice(0, 20);
+  const movies2025Plus = useMemo(() => {
+    return catalog.movies.filter((m) => (getYearFromTitle(m.title) ?? 0) >= 2025).sort(byNewestYear);
   }, [catalog.movies]);
 
-  const recentMovies = useMemo(() => catalog.movies.slice(-20).reverse(), [catalog.movies]);
+  const trending = useMemo(() => {
+    const prioritized = movies2025Plus.length > 0 ? movies2025Plus : [...catalog.movies].sort(byNewestYear);
+    return prioritized.slice(0, 20);
+  }, [catalog.movies, movies2025Plus]);
+
+  const recentMovies = useMemo(() => {
+    const source = movies2025Plus.length > 0 ? movies2025Plus : [...catalog.movies].sort(byNewestYear);
+    return source.slice(0, 20);
+  }, [catalog.movies, movies2025Plus]);
+
+  const popularSeries = useMemo(() => {
+    return [...catalog.series]
+      .map((series) => {
+        const idx = KNOWN_SERIES.findIndex((name) => series.title.toLowerCase().includes(name));
+        return {
+          series,
+          score: idx === -1 ? 999 : idx,
+        };
+      })
+      .sort((a, b) => a.score - b.score || a.series.title.localeCompare(b.series.title))
+      .map((entry) => entry.series)
+      .slice(0, 20);
+  }, [catalog.series]);
 
   const favItems = useMemo(() => {
-    const favMovies = catalog.movies.filter(m => favorites.has(m.id)).slice(0, 20);
-    const favSeries = catalog.series.filter(s => favorites.has(s.id)).slice(0, 20);
+    const favMovies = catalog.movies.filter((m) => favorites.has(m.id)).slice(0, 20);
+    const favSeries = catalog.series.filter((s) => favorites.has(s.id)).slice(0, 20);
     return [
-      ...favMovies.map(m => ({ ...m, type: 'movie' as const })),
-      ...favSeries.map(s => ({ id: s.id, title: s.title, logo: s.logo, group: s.group, type: 'series' as const })),
+      ...favMovies.map((m) => ({ ...m, type: 'movie' as const })),
+      ...favSeries.map((s) => ({ id: s.id, title: s.title, logo: s.logo, group: s.group, type: 'series' as const })),
     ];
   }, [catalog, favorites]);
 
-  if (isBootstrapping || (isLoading && !catalog.isLoaded)) {
-    return <CatalogLoading message="Atualizando catálogo" />;
+  if (!catalog.isLoaded) {
+    return <HeroBanner />;
   }
 
   return (
-    <div className="min-h-screen pb-12 bg-gradient-to-b from-background via-background to-background/95">
-      {catalog.isLoaded ? (
-        <DashboardHero />
-      ) : (
-        <div className="px-4 md:px-6 pt-3">
-          <div className="rounded-2xl border border-border bg-card/60 p-6 md:p-8">
-            <h1 className="text-3xl md:text-5xl font-bold text-foreground" style={{ fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '0.05em' }}>
-              Dashboard
-            </h1>
-            <p className="text-muted-foreground mt-2 text-sm md:text-base">
-              Faça a importação da sua lista M3U pelo menu para começar a preencher o catálogo.
-            </p>
-          </div>
-        </div>
-      )}
+    <div className="min-h-screen pb-12">
+      <DashboardHero />
 
-      <div className="mt-4 md:mt-6 space-y-5 md:space-y-6">
-        {catalog.isLoaded && <StatsBar />}
+      <div className="mt-6 space-y-6">
+        <StatsBar />
 
-        <ContentRow
-          title="🔥 Em Alta"
-          items={trending.map(m => ({ ...m, type: 'movie' as const }))}
-        />
+        <ContentRow title="🔥 Em Alta" items={trending.map((m) => ({ ...m, type: 'movie' as const }))} />
 
-        {catalog.series.length > 0 && (
+        {popularSeries.length > 0 && (
           <ContentRow
-            title="📺 Séries"
-            items={catalog.series.slice(0, 20).map(s => ({ id: s.id, title: s.title, logo: s.logo, group: s.group, type: 'series' as const }))}
-            seeAllTo="/series"
-            limit={10}
-            showEndCard
+            title="📺 Séries em Alta"
+            items={popularSeries.map((s) => ({ id: s.id, title: s.title, logo: s.logo, group: s.group, type: 'series' as const }))}
           />
         )}
 
         {recentMovies.length > 0 && (
-          <ContentRow
-            title="✨ Adicionados Recentemente"
-            items={recentMovies.map(m => ({ ...m, type: 'movie' as const }))}
-          />
+          <ContentRow title="✨ Adicionados Recentemente" items={recentMovies.map((m) => ({ ...m, type: 'movie' as const }))} />
         )}
 
-        {favItems.length > 0 && (
-          <ContentRow
-            title="❤️ Seus Favoritos"
-            items={favItems}
-            limit={10}
-            seeAllTo="/favorites"
-            showEndCard
-          />
-        )}
+        {favItems.length > 0 && <ContentRow title="❤️ Seus Favoritos" items={favItems} />}
 
         {moviesByGroup.slice(0, 10).map(([group, movies]) => (
-          <ContentRow
-            key={group}
-            title={group}
-            items={movies.slice(0, 20).map(m => ({ ...m, type: 'movie' as const }))}
-            seeAllTo={`/movies?cat=${encodeURIComponent(group)}`}
-            limit={12}
-            showEndCard
-          />
+          <ContentRow key={group} title={group} items={movies.slice(0, 20).map((m) => ({ ...m, type: 'movie' as const }))} />
         ))}
       </div>
     </div>
