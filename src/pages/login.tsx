@@ -39,7 +39,7 @@ export default function LoginPage() {
           VIBECINES
         </h1>
         <p className="text-sm text-muted-foreground mb-6">
-          Faça login para acessar o dashboard. Apenas o admin pode importar/atualizar a lista M3U.
+          Faça login para acessar o melhor acervo de filmes e séries.
         </p>
 
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -87,4 +87,5 @@ export default function LoginPage() {
       </div>
     </div>
   );
+
 }
