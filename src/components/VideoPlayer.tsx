@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Hls from 'hls.js';
-import { ArrowLeft, Maximize, Minimize, Pause, Play, Volume2, VolumeX } from 'lucide-react';
+import { ArrowLeft, Maximize, Minimize, Pause, Play, RotateCcw, RotateCw, Volume2, VolumeX } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
 interface VideoPlayerProps {
@@ -12,6 +12,7 @@ interface VideoPlayerProps {
 export function VideoPlayer({ url, title, contentId }: VideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const clickTimeout = useRef<ReturnType<typeof setTimeout>>();
   const navigate = useNavigate();
   const [playing, setPlaying] = useState(false);
   const [muted, setMuted] = useState(false);
@@ -96,6 +97,28 @@ export function VideoPlayer({ url, title, contentId }: VideoPlayerProps) {
     }
   };
 
+  const seekBy = (seconds: number) => {
+    const video = videoRef.current;
+    if (!video) return;
+
+    const target = Math.min(Math.max(video.currentTime + seconds, 0), duration || video.duration || 0);
+    video.currentTime = target;
+    setProgress(target);
+    handleUserInteraction();
+  };
+
+  const handleSingleClick = () => {
+    if (clickTimeout.current) clearTimeout(clickTimeout.current);
+    clickTimeout.current = setTimeout(() => {
+      void togglePlay();
+    }, 220);
+  };
+
+  const handleDoubleClick = (seconds: number) => {
+    if (clickTimeout.current) clearTimeout(clickTimeout.current);
+    seekBy(seconds);
+  };
+
   const seek = (e: React.ChangeEvent<HTMLInputElement>) => {
     const video = videoRef.current;
     if (!video) return;
@@ -115,30 +138,49 @@ export function VideoPlayer({ url, title, contentId }: VideoPlayerProps) {
   };
 
   const formatTime = (t: number) => {
-    if (!Number.isFinite(t) || t <= 0) return '00:00';
-    const m = Math.floor(t / 60);
-    const s = Math.floor(t % 60);
-    return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+    if (!Number.isFinite(t) || t <= 0) return '00:00:00';
+    const totalSeconds = Math.floor(t);
+    const h = Math.floor(totalSeconds / 3600);
+    const m = Math.floor((totalSeconds % 3600) / 60);
+    const s = totalSeconds % 60;
+
+    return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
   };
+
+  const progressPercent = useMemo(() => {
+    if (!duration || duration <= 0) return 0;
+    return Math.min(100, Math.max(0, (progress / duration) * 100));
+  }, [progress, duration]);
 
   return (
     <div
       ref={containerRef}
-      className="relative w-full bg-black overflow-hidden min-h-[260px] aspect-[4/3] sm:aspect-video"
+      className="relative w-full bg-black overflow-hidden min-h-[260px] aspect-[4/3] sm:aspect-video rounded-none md:rounded-xl"
       onMouseMove={handleUserInteraction}
       onTouchStart={handleUserInteraction}
-      onClick={togglePlay}
+      onClick={handleSingleClick}
     >
-      <video
-        ref={videoRef}
-        className="w-full h-full object-contain"
-        muted={muted}
-        playsInline
-        autoPlay
-      />
+      <video ref={videoRef} className="w-full h-full object-contain" muted={muted} playsInline autoPlay />
+
+      <div className="absolute inset-0 grid grid-cols-2 z-10">
+        <button
+          onDoubleClick={() => handleDoubleClick(-10)}
+          className="h-full w-full"
+          aria-label="Retroceder 10 segundos"
+        >
+          <span className="sr-only">Retroceder 10 segundos</span>
+        </button>
+        <button
+          onDoubleClick={() => handleDoubleClick(10)}
+          className="h-full w-full"
+          aria-label="Avançar 10 segundos"
+        >
+          <span className="sr-only">Avançar 10 segundos</span>
+        </button>
+      </div>
 
       <div
-        className={`absolute inset-0 flex flex-col justify-between transition-opacity duration-300 ${
+        className={`absolute inset-0 z-20 flex flex-col justify-between transition-opacity duration-300 ${
           showControls ? 'opacity-100' : 'opacity-0'
         }`}
         onClick={(e) => e.stopPropagation()}
@@ -154,13 +196,29 @@ export function VideoPlayer({ url, title, contentId }: VideoPlayerProps) {
           <span className="text-sm sm:text-base font-medium text-foreground truncate">{title}</span>
         </div>
 
-        <div className="flex items-center justify-center">
+        <div className="flex items-center justify-between px-6 sm:px-10">
           <button
-            onClick={togglePlay}
+            onClick={() => seekBy(-10)}
+            className="p-2 rounded-full bg-background/50 text-foreground hover:text-primary transition-colors"
+            aria-label="Retroceder 10 segundos"
+          >
+            <RotateCcw className="w-6 h-6" />
+          </button>
+
+          <button
+            onClick={() => void togglePlay()}
             className="p-3 sm:p-4 rounded-full bg-primary/85 text-primary-foreground backdrop-blur-sm shadow-lg"
             aria-label={playing ? 'Pausar' : 'Reproduzir'}
           >
             {playing ? <Pause className="w-8 h-8" /> : <Play className="w-8 h-8 fill-current" />}
+          </button>
+
+          <button
+            onClick={() => seekBy(10)}
+            className="p-2 rounded-full bg-background/50 text-foreground hover:text-primary transition-colors"
+            aria-label="Avançar 10 segundos"
+          >
+            <RotateCw className="w-6 h-6" />
           </button>
         </div>
 
@@ -171,7 +229,10 @@ export function VideoPlayer({ url, title, contentId }: VideoPlayerProps) {
             max={duration || 0}
             value={progress}
             onChange={seek}
-            className="w-full h-1.5 appearance-none bg-muted/80 rounded-full cursor-pointer accent-primary"
+            className="w-full h-1.5 appearance-none rounded-full cursor-pointer"
+            style={{
+              background: `linear-gradient(to right, hsl(var(--primary)) 0%, hsl(var(--primary)) ${progressPercent}%, hsl(var(--muted)) ${progressPercent}%, hsl(var(--muted)) 100%)`,
+            }}
           />
 
           <div className="flex items-center justify-between text-xs sm:text-sm text-foreground/80">
