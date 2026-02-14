@@ -13,6 +13,17 @@ const SeriesPage = () => {
   const [seriesSearch, setSeriesSearch] = useState('');
   const [categorySearch, setCategorySearch] = useState('');
 
+
+
+
+
+
+
+
+
+
+
+
   const seriesByGroupMap = useMemo(() => {
     const map = new Map<string, typeof catalog.series>();
     catalog.series.forEach(series => {
@@ -20,6 +31,13 @@ const SeriesPage = () => {
       map.get(series.group)!.push(series);
     });
     return map;
+
+
+
+
+
+
+
   }, [catalog.series]);
 
   const seriesByGroup = useMemo(
@@ -59,6 +77,9 @@ const SeriesPage = () => {
         <p className="text-muted-foreground text-sm mt-1">
           {selectedCategory ? `Categoria: ${selectedCategory}` : `${catalog.series.length} séries disponíveis`}
         </p>
+
+
+
       </div>
 
       {selectedCategory ? (
