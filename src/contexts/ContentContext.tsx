@@ -10,7 +10,7 @@ interface ContentContextType {
   isLoading: boolean;
   error: string | null;
   loadFromUrl: (url: string, persistShared?: boolean) => Promise<boolean>;
-  loadFromText: (text: string) => void;
+  loadFromText: (text: string, persistShared?: boolean) => Promise<boolean>;
   favorites: Set<string>;
   toggleFavorite: (id: string) => void;
   isFavorite: (id: string) => boolean;
@@ -21,6 +21,7 @@ interface ContentContextType {
 }
 
 const ContentContext = createContext<ContentContextType | null>(null);
+const DEFAULT_M3U_URL = (import.meta.env.VITE_DEFAULT_M3U_URL as string | undefined)?.trim() || null;
 
 export function ContentProvider({ children }: { children: React.ReactNode }) {
   const { isAdmin } = useAuth();
@@ -43,10 +44,15 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
     localStorage.setItem('vibecines_favorites', JSON.stringify([...favorites]));
   }, [favorites]);
 
-  // Auto-load last URL saved on this device
+  // Auto-load last URL saved on this device or default URL from env
   useEffect(() => {
-    if (m3uUrl && !catalog.isLoaded) {
+    if (catalog.isLoaded) return;
+    if (m3uUrl) {
       void loadFromUrl(m3uUrl);
+      return;
+    }
+    if (DEFAULT_M3U_URL) {
+      void loadFromUrl(DEFAULT_M3U_URL);
     }
   }, []);
 
@@ -55,7 +61,12 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
     const configRef = doc(db, 'appConfig', 'catalog');
     const unsubscribe = onSnapshot(configRef, snapshot => {
       const data = snapshot.data();
+      const sharedText = (data?.m3uContent as string | undefined)?.trim();
       const sharedUrl = (data?.m3uUrl as string | undefined)?.trim();
+      if (sharedText) {
+        void loadFromText(sharedText, false);
+        return;
+      }
       if (!sharedUrl) return;
       if (sharedUrl === m3uUrl && catalog.isLoaded) return;
       void loadFromUrl(sharedUrl, false);
@@ -86,6 +97,7 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
       if (persistShared) {
         await setDoc(doc(db, 'appConfig', 'catalog'), {
           m3uUrl: url,
+          m3uContent: null,
           updatedAt: Date.now(),
         }, { merge: true });
       }
@@ -99,10 +111,40 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
     }
   }, [isAdmin]);
 
-  const loadFromText = useCallback((text: string) => {
-    const result = parseM3U(text);
-    setCatalog(result);
-  }, []);
+  const loadFromText = useCallback(async (text: string, persistShared = false) => {
+    if (persistShared && !isAdmin) {
+      setError('Somente o administrador pode atualizar a lista M3U.');
+      return false;
+    }
+
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      const result = parseM3U(text);
+      if (!result.isLoaded) {
+        setError('O arquivo M3U não possui conteúdos compatíveis para o catálogo.');
+        return false;
+      }
+
+      setCatalog(result);
+
+      if (persistShared) {
+        await setDoc(doc(db, 'appConfig', 'catalog'), {
+          m3uContent: text,
+          m3uUrl: null,
+          updatedAt: Date.now(),
+        }, { merge: true });
+      }
+
+      return true;
+    } catch {
+      setError('Erro ao carregar o arquivo M3U. Verifique o conteúdo e tente novamente.');
+      return false;
+    } finally {
+      setIsLoading(false);
+    }
+  }, [isAdmin]);
 
   const toggleFavorite = useCallback((id: string) => {
     setFavorites(prev => {
