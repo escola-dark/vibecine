@@ -22,12 +22,12 @@ export function Navbar() {
   ];
 
   const movieGroups = useMemo(() => {
-    const groups = [...new Set(catalog.movies.map(m => m.group))];
+    const groups = [...new Set(catalog.movies.map((m) => m.group))];
     return groups.slice(0, 18);
   }, [catalog.movies]);
 
   const seriesGroups = useMemo(() => {
-    const groups = [...new Set(catalog.series.map(s => s.group))];
+    const groups = [...new Set(catalog.series.map((s) => s.group))];
     return groups.slice(0, 12);
   }, [catalog.series]);
 
@@ -38,7 +38,7 @@ export function Navbar() {
           <div className="flex items-center gap-3">
             <button
               onClick={() => setMenuOpen(true)}
-              className="p-2 rounded-lg text-foreground hover:bg-secondary"
+              className="md:hidden p-2 rounded-lg text-foreground hover:bg-secondary"
               aria-label="Abrir menu"
             >
               <Menu className="w-5 h-5" />
@@ -48,14 +48,17 @@ export function Navbar() {
               <div className="w-9 h-9 rounded-xl bg-primary/90 grid place-items-center">
                 <Film className="w-5 h-5 text-primary-foreground" />
               </div>
-              <span className="text-2xl md:text-4xl font-bold tracking-tight text-primary" style={{ fontFamily: "'Bebas Neue', sans-serif" }}>
+              <span
+                className="text-2xl md:text-4xl font-bold tracking-tight text-primary"
+                style={{ fontFamily: "'Bebas Neue', sans-serif" }}
+              >
                 VibeCines
               </span>
             </Link>
           </div>
 
           <div className="hidden md:flex items-center gap-2">
-            {navItems.map(item => {
+            {navItems.map((item) => {
               const active = location.pathname === item.to;
               return (
                 <Link
@@ -63,7 +66,9 @@ export function Navbar() {
                   to={item.to}
                   className={cn(
                     'px-4 py-2 rounded-xl text-xl font-medium flex items-center gap-2 transition-colors',
-                    active ? 'bg-primary/15 text-primary' : 'text-foreground/70 hover:text-foreground hover:bg-secondary/70'
+                    active
+                      ? 'bg-primary/15 text-primary'
+                      : 'text-foreground/70 hover:text-foreground hover:bg-secondary/70',
                   )}
                   style={{ fontFamily: "'Bebas Neue', sans-serif" }}
                 >
@@ -88,7 +93,7 @@ export function Navbar() {
             </button>
 
             <button
-              onClick={() => setProfileOpen(prev => !prev)}
+              onClick={() => setProfileOpen((prev) => !prev)}
               className="px-4 py-2 rounded-xl border border-border bg-secondary/40 text-foreground flex items-center gap-2"
             >
               <Shield className="w-4 h-4" />
@@ -97,7 +102,7 @@ export function Navbar() {
           </div>
 
           <button
-            onClick={() => setProfileOpen(prev => !prev)}
+            onClick={() => setProfileOpen((prev) => !prev)}
             className="md:hidden p-2 rounded-lg text-foreground hover:bg-secondary"
             aria-label="Perfil"
           >
@@ -110,7 +115,7 @@ export function Navbar() {
         <div className="fixed inset-0 z-[70] bg-black/50" onClick={() => setMenuOpen(false)}>
           <aside
             className="w-[86vw] max-w-sm h-full bg-card border-r border-border p-4 overflow-y-auto"
-            onClick={e => e.stopPropagation()}
+            onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between mb-4">
               <p className="text-lg font-semibold">Menu</p>
@@ -120,7 +125,7 @@ export function Navbar() {
             </div>
 
             <div className="space-y-2 mb-5">
-              {navItems.map(item => (
+              {navItems.map((item) => (
                 <Link
                   key={item.to}
                   to={item.to}
@@ -136,7 +141,7 @@ export function Navbar() {
             <div className="mb-4">
               <p className="text-xs uppercase tracking-widest text-muted-foreground mb-2">Categorias de Filmes</p>
               <div className="space-y-1">
-                {movieGroups.map(group => (
+                {movieGroups.map((group) => (
                   <Link
                     key={group}
                     to={`/movies?cat=${encodeURIComponent(group)}`}
@@ -152,7 +157,7 @@ export function Navbar() {
             <div>
               <p className="text-xs uppercase tracking-widest text-muted-foreground mb-2">Categorias de Séries</p>
               <div className="space-y-1">
-                {seriesGroups.map(group => (
+                {seriesGroups.map((group) => (
                   <Link
                     key={group}
                     to={`/series?cat=${encodeURIComponent(group)}`}
@@ -172,7 +177,7 @@ export function Navbar() {
         <div className="fixed inset-0 z-[75]" onClick={() => setProfileOpen(false)}>
           <div
             className="absolute right-3 md:right-6 top-16 md:top-20 w-56 rounded-xl border border-border bg-card p-2 shadow-card"
-            onClick={e => e.stopPropagation()}
+            onClick={(e) => e.stopPropagation()}
           >
             <div className="px-3 py-2 border-b border-border mb-1">
               <p className="text-sm font-medium">{isAdmin ? 'Admin' : 'Usuário'}</p>

@@ -30,7 +30,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, currentUser => {
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
       setIsCheckingAuth(false);
     });
@@ -58,16 +58,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await signOut(auth);
   };
 
-  const value = useMemo<AuthContextType>(() => ({
-    user,
-    isAuthenticated: !!user,
-    isAdmin: (user?.email || '').toLowerCase() === ADMIN_EMAIL,
-    isCheckingAuth,
-    isSigningIn,
-    error,
-    login,
-    logout,
-  }), [user, isCheckingAuth, isSigningIn, error]);
+  const value = useMemo<AuthContextType>(
+    () => ({
+      user,
+      isAuthenticated: !!user,
+      isAdmin: (user?.email || '').toLowerCase() === ADMIN_EMAIL,
+      isCheckingAuth,
+      isSigningIn,
+      error,
+      login,
+      logout,
+    }),
+    [user, isCheckingAuth, isSigningIn, error],
+  );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

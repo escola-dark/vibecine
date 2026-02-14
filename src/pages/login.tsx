@@ -1,16 +1,31 @@
-import { FormEvent, useState } from 'react';
+import { FormEvent, useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import heroBg from '@/assets/hero-bg.jpg';
 import { useAuth } from '@/contexts/AuthContext';
+import { getLastRoute, hasRememberChoice, setRememberChoice } from '@/lib/session';
 
 export default function LoginPage() {
-  const { login, isSigningIn, error } = useAuth();
+  const navigate = useNavigate();
+  const { login, isSigningIn, error, isAuthenticated } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [rememberMe, setRememberMe] = useState(true);
+  const [keepConnected, setKeepConnected] = useState(hasRememberChoice());
+
+  useEffect(() => {
+    if (isAuthenticated) {
+      const destination = hasRememberChoice() ? getLastRoute() : '/';
+      navigate(destination, { replace: true });
+    }
+  }, [isAuthenticated, navigate]);
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
-    await login(email, password, rememberMe);
+
+    const success = await login(email, password, keepConnected);
+    if (!success) return;
+
+    setRememberChoice(keepConnected);
+    navigate(keepConnected ? getLastRoute() : '/', { replace: true });
   };
 
   return (
@@ -34,7 +49,7 @@ export default function LoginPage() {
               type="email"
               className="w-full rounded-lg bg-secondary border border-border px-4 py-3 text-sm"
               value={email}
-              onChange={e => setEmail(e.target.value)}
+              onChange={(e) => setEmail(e.target.value)}
               required
             />
           </div>
@@ -45,7 +60,7 @@ export default function LoginPage() {
               type="password"
               className="w-full rounded-lg bg-secondary border border-border px-4 py-3 text-sm"
               value={password}
-              onChange={e => setPassword(e.target.value)}
+              onChange={(e) => setPassword(e.target.value)}
               required
             />
           </div>
@@ -53,8 +68,8 @@ export default function LoginPage() {
           <label className="flex items-center gap-2 text-sm text-muted-foreground">
             <input
               type="checkbox"
-              checked={rememberMe}
-              onChange={e => setRememberMe(e.target.checked)}
+              checked={keepConnected}
+              onChange={(e) => setKeepConnected(e.target.checked)}
             />
             Manter conectado
           </label>
