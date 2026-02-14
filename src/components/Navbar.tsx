@@ -3,11 +3,13 @@ import { Search, Heart, Film, Tv, Menu, X, Upload } from 'lucide-react';
 import { useState } from 'react';
 import { useContent } from '@/contexts/ContentContext';
 import { ImportModal } from './ImportModal';
+import { useAuth } from '@/contexts/AuthContext';
 
 export function Navbar() {
   const location = useLocation();
   const navigate = useNavigate();
   const { catalog } = useContent();
+  const { isAdmin } = useAuth();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
 
@@ -53,13 +55,15 @@ export function Navbar() {
                 <Search className="w-5 h-5" />
               </button>
             )}
-            <button
-              onClick={() => setImportOpen(true)}
-              className="p-2 rounded-full text-foreground/70 hover:text-primary transition-colors"
-              title="Importar lista M3U"
-            >
-              <Upload className="w-5 h-5" />
-            </button>
+            {isAdmin && (
+              <button
+                onClick={() => setImportOpen(true)}
+                className="p-2 rounded-full text-foreground/70 hover:text-primary transition-colors"
+                title="Importar lista M3U"
+              >
+                <Upload className="w-5 h-5" />
+              </button>
+            )}
             <button
               onClick={() => setMobileOpen(!mobileOpen)}
               className="p-2 md:hidden text-foreground/70"
@@ -89,7 +93,7 @@ export function Navbar() {
         )}
       </nav>
 
-      <ImportModal open={importOpen} onClose={() => setImportOpen(false)} />
+      {isAdmin && <ImportModal open={importOpen} onClose={() => setImportOpen(false)} />}
     </>
   );
 }

@@ -1,12 +1,13 @@
 import { useState, useMemo } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
-  Home, Film, Tv, Heart, Search, Upload, TrendingUp,
-  ChevronLeft, ChevronRight, Clock, Sparkles, Layers
+  Home, Film, Tv, Heart, Search, Upload, LogOut,
+  ChevronLeft, ChevronRight, Layers
 } from 'lucide-react';
 import { useContent } from '@/contexts/ContentContext';
 import { ImportModal } from './ImportModal';
 import { cn } from '@/lib/utils';
+import { useAuth } from '@/contexts/AuthContext';
 
 const mainNav = [
   { to: '/', label: 'Início', icon: Home },
@@ -21,6 +22,7 @@ export function DashboardSidebar() {
   const { catalog } = useContent();
   const [collapsed, setCollapsed] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
+  const { logout, isAdmin } = useAuth();
 
   // Get unique groups/categories
   const movieGroups = useMemo(() => {
@@ -146,16 +148,30 @@ export function DashboardSidebar() {
 
         {/* Bottom actions */}
         <div className="px-3 py-3 mt-auto border-t border-border flex-shrink-0">
+          {isAdmin && (
+            <button
+              onClick={() => setImportOpen(true)}
+              className={cn(
+                "flex items-center gap-3 w-full rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors",
+                collapsed ? "p-2.5 justify-center" : "px-3 py-2.5"
+              )}
+              title="Importar lista M3U"
+            >
+              <Upload className="w-[18px] h-[18px] flex-shrink-0" />
+              {!collapsed && <span className="text-sm font-medium">Importar M3U</span>}
+            </button>
+          )}
+
           <button
-            onClick={() => setImportOpen(true)}
+            onClick={() => void logout()}
             className={cn(
-              "flex items-center gap-3 w-full rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors",
+              "mt-2 flex items-center gap-3 w-full rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors",
               collapsed ? "p-2.5 justify-center" : "px-3 py-2.5"
             )}
-            title="Importar lista M3U"
+            title="Sair"
           >
-            <Upload className="w-[18px] h-[18px] flex-shrink-0" />
-            {!collapsed && <span className="text-sm font-medium">Importar M3U</span>}
+            <LogOut className="w-[18px] h-[18px] flex-shrink-0" />
+            {!collapsed && <span className="text-sm font-medium">Sair</span>}
           </button>
 
           {/* Stats */}
@@ -178,7 +194,7 @@ export function DashboardSidebar() {
         </div>
       </aside>
 
-      <ImportModal open={importOpen} onClose={() => setImportOpen(false)} />
+      {isAdmin && <ImportModal open={importOpen} onClose={() => setImportOpen(false)} />}
     </>
   );
 }

@@ -13,6 +13,7 @@ import { ADMIN_EMAIL, auth } from '@/lib/firebase';
 interface AuthContextType {
   user: User | null;
   isAuthenticated: boolean;
+  isAdmin: boolean;
   isCheckingAuth: boolean;
   isSigningIn: boolean;
   error: string | null;
@@ -38,11 +39,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const login = async (email: string, password: string, rememberMe: boolean) => {
-    if (email.trim().toLowerCase() !== ADMIN_EMAIL) {
-      setError('Apenas o usuário administrador pode acessar.');
-      return false;
-    }
-
     setIsSigningIn(true);
     setError(null);
 
@@ -51,7 +47,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       await signInWithEmailAndPassword(auth, email.trim(), password);
       return true;
     } catch {
-      setError('Falha no login. Verifique as credenciais do administrador no Firebase Auth.');
+      setError('Falha no login. Verifique seu usuário e senha no Firebase Auth.');
       return false;
     } finally {
       setIsSigningIn(false);
@@ -65,6 +61,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const value = useMemo<AuthContextType>(() => ({
     user,
     isAuthenticated: !!user,
+    isAdmin: (user?.email || '').toLowerCase() === ADMIN_EMAIL,
     isCheckingAuth,
     isSigningIn,
     error,
