@@ -1,5 +1,5 @@
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { Bell, Film, Home, Menu, Search, Shield, Tv, Upload, User, X, LogOut } from 'lucide-react';
+import { Bell, Check, Film, Home, LogOut, Menu, Pencil, Search, Shield, Tv, Upload, User, X } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { useContent } from '@/contexts/ContentContext';
 import { ImportModal } from './ImportModal';
@@ -10,10 +10,13 @@ export function Navbar() {
   const location = useLocation();
   const navigate = useNavigate();
   const { catalog } = useContent();
-  const { isAdmin, logout, user } = useAuth();
+  const { isAdmin, logout, user, profileName, updateProfileName } = useAuth();
   const [menuOpen, setMenuOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
+  const [editingName, setEditingName] = useState(false);
+  const [nameDraft, setNameDraft] = useState(profileName);
+  const [savingName, setSavingName] = useState(false);
 
   const navItems = [
     { to: '/', label: 'Início', icon: Home },
@@ -30,6 +33,23 @@ export function Navbar() {
     const groups = [...new Set(catalog.series.map((s) => s.group))];
     return groups.slice(0, 12);
   }, [catalog.series]);
+
+  const displayName = profileName || user?.displayName || user?.email?.split('@')[0] || 'Usuário';
+
+  const openProfile = () => {
+    setNameDraft(displayName);
+    setEditingName(false);
+    setProfileOpen((prev) => !prev);
+  };
+
+  const handleSaveName = async () => {
+    setSavingName(true);
+    const ok = await updateProfileName(nameDraft);
+    setSavingName(false);
+    if (ok) {
+      setEditingName(false);
+    }
+  };
 
   return (
     <>
@@ -93,16 +113,16 @@ export function Navbar() {
             </button>
 
             <button
-              onClick={() => setProfileOpen((prev) => !prev)}
+              onClick={openProfile}
               className="px-4 py-2 rounded-xl border border-border bg-secondary/40 text-foreground flex items-center gap-2"
             >
               <Shield className="w-4 h-4" />
-              {isAdmin ? 'Admin' : 'Usuário'}
+              {displayName}
             </button>
           </div>
 
           <button
-            onClick={() => setProfileOpen((prev) => !prev)}
+            onClick={openProfile}
             className="md:hidden p-2 rounded-lg text-foreground hover:bg-secondary"
             aria-label="Perfil"
           >
@@ -176,12 +196,43 @@ export function Navbar() {
       {profileOpen && (
         <div className="fixed inset-0 z-[75]" onClick={() => setProfileOpen(false)}>
           <div
-            className="absolute right-3 md:right-6 top-16 md:top-20 w-56 rounded-xl border border-border bg-card p-2 shadow-card"
+            className="absolute right-3 md:right-6 top-16 md:top-20 w-72 rounded-xl border border-border bg-card p-2 shadow-card"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="px-3 py-2 border-b border-border mb-1">
+            <div className="px-3 py-2 border-b border-border mb-2 space-y-1">
               <p className="text-sm font-medium">{isAdmin ? 'Admin' : 'Usuário'}</p>
               <p className="text-xs text-muted-foreground truncate">{user?.email || 'Logado'}</p>
+            </div>
+
+            <div className="px-2 py-2 mb-1">
+              <p className="text-xs text-muted-foreground mb-1">Nome do perfil</p>
+              <div className="flex items-center gap-2">
+                <input
+                  value={nameDraft}
+                  onChange={(e) => setNameDraft(e.target.value)}
+                  disabled={!editingName}
+                  className="flex-1 h-9 rounded-lg border border-border bg-background px-3 text-sm disabled:opacity-80"
+                  placeholder="Digite seu nome"
+                />
+                {!editingName ? (
+                  <button
+                    onClick={() => setEditingName(true)}
+                    className="h-9 w-9 rounded-lg border border-border grid place-items-center hover:bg-secondary"
+                    aria-label="Editar nome"
+                  >
+                    <Pencil className="w-4 h-4" />
+                  </button>
+                ) : (
+                  <button
+                    onClick={handleSaveName}
+                    disabled={savingName}
+                    className="h-9 w-9 rounded-lg border border-border grid place-items-center hover:bg-secondary disabled:opacity-60"
+                    aria-label="Salvar nome"
+                  >
+                    <Check className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
             </div>
 
             {isAdmin && (
