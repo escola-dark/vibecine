@@ -5,13 +5,22 @@ import { useNavigate } from 'react-router-dom';
 import { useContent } from '@/contexts/ContentContext';
 import { ContentItem } from '@/types/content';
 
+const getYearFromTitle = (title: string) => {
+  const match = title.match(/(?:19|20)\d{2}/g);
+  if (!match || match.length === 0) return null;
+  return Number(match[match.length - 1]);
+};
+
+
 export function DashboardHero() {
   const { catalog, toggleFavorite, isFavorite } = useContent();
   const navigate = useNavigate();
 
   // Pick 5 featured items for slideshow
   const featured = useMemo(() => {
-    const pool = catalog.movies.filter(m => m.logo).slice(0, 50);
+    const withLogo = catalog.movies.filter((m) => m.logo);
+    const prioritized2024 = withLogo.filter((m) => (getYearFromTitle(m.title) ?? 0) >= 2024);
+    const pool = (prioritized2024.length > 0 ? prioritized2024 : withLogo).slice(0, 60);
     const shuffled = [...pool].sort(() => Math.random() - 0.5);
     return shuffled.slice(0, Math.min(5, shuffled.length));
   }, [catalog.movies]);
