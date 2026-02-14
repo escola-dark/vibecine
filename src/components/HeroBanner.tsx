@@ -19,7 +19,7 @@ export function HeroBanner() {
           <div className="inline-flex items-center gap-3 rounded-xl border border-border bg-card/60 px-5 py-3 backdrop-blur-sm">
             <Loader2 className={`w-5 h-5 text-primary ${isLoading ? 'animate-spin' : ''}`} />
             <span className="text-sm md:text-base text-foreground/90">
-              Catalog Loading... aguarde enquanto carregamos filmes e séries.
+              aguarde enquanto atualizamos os filmes e séries.
             </span>
           </div>
         </div>
