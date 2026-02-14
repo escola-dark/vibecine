@@ -9,7 +9,7 @@ const SearchPage = () => {
   const results = query.length >= 2 ? searchContent(query) : { movies: [], series: [] };
 
   return (
-    <div className="min-h-screen pt-24 pb-12">
+    <div className="min-h-screen pt-6 md:pt-8 pb-12">
       <div className="container mx-auto px-4">
         <div className="relative max-w-xl mx-auto mb-10">
           <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />

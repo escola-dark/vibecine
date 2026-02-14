@@ -9,7 +9,7 @@ const FavoritesPage = () => {
   const favSeries = catalog.series.filter(s => favorites.has(s.id));
 
   return (
-    <div className="min-h-screen pt-24 pb-12">
+    <div className="min-h-screen pt-6 md:pt-8 pb-12">
       <div className="container mx-auto px-4">
         <h1 className="text-4xl font-bold text-foreground mb-8" style={{ fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '0.05em' }}>
           <Heart className="inline w-8 h-8 text-primary mr-2 fill-primary" />

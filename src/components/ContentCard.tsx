@@ -25,7 +25,7 @@ export function ContentCard({ id, title, logo, group, type }: ContentCardProps) 
 
   return (
     <div
-      className="group relative flex-shrink-0 w-[160px] md:w-[200px] cursor-pointer"
+      className="group relative w-full cursor-pointer"
       onClick={handleClick}
     >
       <div className="relative aspect-[2/3] rounded-lg overflow-hidden bg-secondary shadow-card transition-transform duration-300 group-hover:scale-105 group-hover:shadow-glow">

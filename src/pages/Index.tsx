@@ -2,13 +2,12 @@ import { useMemo } from 'react';
 import { DashboardHero } from '@/components/DashboardHero';
 import { ContentRow } from '@/components/ContentRow';
 import { StatsBar } from '@/components/StatsBar';
-import { HeroBanner } from '@/components/HeroBanner';
 import { useContent } from '@/contexts/ContentContext';
+import { CatalogLoading } from '@/components/CatalogLoading';
 
 const Index = () => {
-  const { catalog, favorites } = useContent();
+  const { catalog, favorites, isBootstrapping, isLoading } = useContent();
 
-  // All hooks must be called before conditional returns
   const moviesByGroup = useMemo(() => {
     const map = new Map<string, typeof catalog.movies>();
     catalog.movies.forEach(m => {
@@ -33,16 +32,29 @@ const Index = () => {
     ];
   }, [catalog, favorites]);
 
-  if (!catalog.isLoaded) {
-    return <HeroBanner />;
+  if (isBootstrapping || (isLoading && !catalog.isLoaded)) {
+    return <CatalogLoading message="Atualizando catálogo" />;
   }
 
   return (
-    <div className="min-h-screen pb-12">
-      <DashboardHero />
+    <div className="min-h-screen pb-12 bg-gradient-to-b from-background via-background to-background/95">
+      {catalog.isLoaded ? (
+        <DashboardHero />
+      ) : (
+        <div className="px-4 md:px-6 pt-3">
+          <div className="rounded-2xl border border-border bg-card/60 p-6 md:p-8">
+            <h1 className="text-3xl md:text-5xl font-bold text-foreground" style={{ fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '0.05em' }}>
+              Dashboard
+            </h1>
+            <p className="text-muted-foreground mt-2 text-sm md:text-base">
+              Faça a importação da sua lista M3U pelo menu para começar a preencher o catálogo.
+            </p>
+          </div>
+        </div>
+      )}
 
-      <div className="mt-6 space-y-6">
-        <StatsBar />
+      <div className="mt-4 md:mt-6 space-y-5 md:space-y-6">
+        {catalog.isLoaded && <StatsBar />}
 
         <ContentRow
           title="🔥 Em Alta"
@@ -53,6 +65,9 @@ const Index = () => {
           <ContentRow
             title="📺 Séries"
             items={catalog.series.slice(0, 20).map(s => ({ id: s.id, title: s.title, logo: s.logo, group: s.group, type: 'series' as const }))}
+            seeAllTo="/series"
+            limit={10}
+            showEndCard
           />
         )}
 
@@ -67,6 +82,9 @@ const Index = () => {
           <ContentRow
             title="❤️ Seus Favoritos"
             items={favItems}
+            limit={10}
+            seeAllTo="/favorites"
+            showEndCard
           />
         )}
 
@@ -75,6 +93,9 @@ const Index = () => {
             key={group}
             title={group}
             items={movies.slice(0, 20).map(m => ({ ...m, type: 'movie' as const }))}
+            seeAllTo={`/movies?cat=${encodeURIComponent(group)}`}
+            limit={12}
+            showEndCard
           />
         ))}
       </div>

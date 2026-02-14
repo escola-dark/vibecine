@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { fetchAndParseM3U, parseM3U } from '@/utils/m3u-parser';
+import JSZip from 'jszip';
+import { fetchAndParseM3U, parseM3U, parseM3UFromZipBuffer } from '@/utils/m3u-parser';
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -41,6 +42,18 @@ describe('fetchAndParseM3U', () => {
       text: async () => '<html>not found</html>',
     }));
 
-    await expect(fetchAndParseM3U('https://example.com/lista.m3u')).rejects.toThrow('Conteúdo inválido');
+    await expect(fetchAndParseM3U('https://example.com/lista.m3u_plus')).rejects.toThrow('Conteúdo inválido');
+  });
+});
+
+describe('parseM3UFromZipBuffer', () => {
+  it('extrai o primeiro arquivo m3u dentro do zip', async () => {
+    const zip = new JSZip();
+    zip.file('lista/playlist.m3u', '#EXTM3U\n#EXTINF:-1 group-title="Filmes",Filme Zip\nhttp://example.com/zip.m3u8');
+    const buffer = await zip.generateAsync({ type: 'arraybuffer' });
+
+    const catalog = await parseM3UFromZipBuffer(buffer);
+    expect(catalog.movies).toHaveLength(1);
+    expect(catalog.movies[0].title).toContain('Filme Zip');
   });
 });

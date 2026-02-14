@@ -10,7 +10,7 @@ interface ImportModalProps {
 }
 
 export function ImportModal({ open, onClose }: ImportModalProps) {
-  const { loadFromUrl, loadFromText, isLoading, m3uUrl, error } = useContent();
+  const { loadFromUrl, loadFromText, loadFromZipBuffer, isLoading, m3uUrl, error } = useContent();
   const { isAdmin } = useAuth();
   const navigate = useNavigate();
   const [url, setUrl] = useState(m3uUrl || '');
@@ -33,8 +33,9 @@ export function ImportModal({ open, onClose }: ImportModalProps) {
     const file = e.target.files?.[0];
     if (!file || !isAdmin) return;
     setFileName(file.name);
-    const content = await file.text();
-    const success = await loadFromText(content, true);
+    const success = file.name.toLowerCase().endsWith('.zip')
+      ? await loadFromZipBuffer(await file.arrayBuffer(), true)
+      : await loadFromText(await file.text(), true);
     if (!success) return;
     onClose();
     navigate('/');
@@ -92,7 +93,7 @@ export function ImportModal({ open, onClose }: ImportModalProps) {
             <div>
               <input
                 type="file"
-                accept=".m3u,.m3u8,text/plain"
+                accept=".zip,.m3u,.m3u8,text/plain"
                 onChange={e => void handleFileChange(e)}
                 className="w-full rounded-lg bg-secondary border border-border px-4 py-3 text-sm"
                 disabled={!isAdmin || isLoading}

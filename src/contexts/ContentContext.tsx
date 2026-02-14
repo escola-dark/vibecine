@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
 import { CatalogState, ContentItem, Series } from '@/types/content';
-import { fetchAndParseM3U, parseM3U } from '@/utils/m3u-parser';
+import { extractM3UTextFromZipBuffer, fetchAndParseM3U, fetchAndParseM3UZip, parseM3U } from '@/utils/m3u-parser';
 import { doc, onSnapshot, setDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useAuth } from './AuthContext';
@@ -8,9 +8,11 @@ import { useAuth } from './AuthContext';
 interface ContentContextType {
   catalog: CatalogState;
   isLoading: boolean;
+  isBootstrapping: boolean;
   error: string | null;
   loadFromUrl: (url: string, persistShared?: boolean) => Promise<boolean>;
   loadFromText: (text: string, persistShared?: boolean) => Promise<boolean>;
+  loadFromZipBuffer: (zipBuffer: ArrayBuffer, persistShared?: boolean) => Promise<boolean>;
   favorites: Set<string>;
   toggleFavorite: (id: string) => void;
   isFavorite: (id: string) => boolean;
@@ -21,7 +23,7 @@ interface ContentContextType {
 }
 
 const ContentContext = createContext<ContentContextType | null>(null);
-const DEFAULT_M3U_URL = (import.meta.env.VITE_DEFAULT_M3U_URL as string | undefined)?.trim() || null;
+const LOCAL_PLAYLIST_PATHS = ['/playlist.zip', '/assets/playlist.zip', '/playlist.m3u', '/assets/playlist.m3u'];
 
 export function ContentProvider({ children }: { children: React.ReactNode }) {
   const { isAdmin } = useAuth();
@@ -33,6 +35,7 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
     isLoaded: false,
   });
   const [isLoading, setIsLoading] = useState(false);
+  const [isBootstrapping, setIsBootstrapping] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [favorites, setFavorites] = useState<Set<string>>(() => {
     const saved = localStorage.getItem('vibecines_favorites');
@@ -44,16 +47,19 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
     localStorage.setItem('vibecines_favorites', JSON.stringify([...favorites]));
   }, [favorites]);
 
-  // Auto-load last URL saved on this device or default URL from env
-  useEffect(() => {
-    if (catalog.isLoaded) return;
-    if (m3uUrl) {
-      void loadFromUrl(m3uUrl);
-      return;
-    }
-    if (DEFAULT_M3U_URL) {
-      void loadFromUrl(DEFAULT_M3U_URL);
-    }
+  const applyCatalog = useCallback((nextCatalog: CatalogState) => {
+    setCatalog(nextCatalog);
+
+    const logos = [
+      ...nextCatalog.movies.map(item => item.logo).filter(Boolean),
+      ...nextCatalog.series.map(item => item.logo).filter(Boolean),
+    ].slice(0, 80) as string[];
+
+    logos.forEach(src => {
+      const img = new Image();
+      img.decoding = 'async';
+      img.src = src;
+    });
   }, []);
 
   // Keep catalog synced with shared admin M3U URL
@@ -84,13 +90,15 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
     setIsLoading(true);
     setError(null);
     try {
-      const result = await fetchAndParseM3U(url);
+      const result = /\.zip(\?.*)?$/i.test(url)
+        ? await fetchAndParseM3UZip(url)
+        : await fetchAndParseM3U(url);
       if (!result.isLoaded) {
         setError('A lista M3U não possui conteúdos compatíveis para o catálogo.');
         return false;
       }
 
-      setCatalog(result);
+      applyCatalog(result);
       setM3uUrl(url);
       localStorage.setItem('vibecines_m3u_url', url);
 
@@ -109,7 +117,7 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
     } finally {
       setIsLoading(false);
     }
-  }, [isAdmin]);
+  }, [isAdmin, applyCatalog]);
 
   const loadFromText = useCallback(async (text: string, persistShared = false) => {
     if (persistShared && !isAdmin) {
@@ -127,7 +135,7 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
         return false;
       }
 
-      setCatalog(result);
+      applyCatalog(result);
 
       if (persistShared) {
         await setDoc(doc(db, 'appConfig', 'catalog'), {
@@ -144,7 +152,77 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
     } finally {
       setIsLoading(false);
     }
-  }, [isAdmin]);
+  }, [isAdmin, applyCatalog]);
+
+  const loadFromZipBuffer = useCallback(async (zipBuffer: ArrayBuffer, persistShared = false) => {
+    if (persistShared && !isAdmin) {
+      setError('Somente o administrador pode atualizar a lista M3U.');
+      return false;
+    }
+
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      const text = await extractM3UTextFromZipBuffer(zipBuffer);
+      const result = parseM3U(text);
+      if (!result.isLoaded) {
+        setError('O arquivo ZIP não possui conteúdos compatíveis para o catálogo.');
+        return false;
+      }
+
+      applyCatalog(result);
+
+      if (persistShared) {
+        await setDoc(doc(db, 'appConfig', 'catalog'), {
+          m3uContent: text,
+          m3uUrl: null,
+          updatedAt: Date.now(),
+        }, { merge: true });
+      }
+
+      return true;
+    } catch {
+      setError('Erro ao carregar o arquivo ZIP M3U. Verifique o conteúdo e tente novamente.');
+      return false;
+    } finally {
+      setIsLoading(false);
+    }
+  }, [isAdmin, applyCatalog]);
+
+  const loadFromLocalPlaylist = useCallback(async () => {
+    for (const path of LOCAL_PLAYLIST_PATHS) {
+      const ok = await loadFromUrl(path, false);
+      if (ok) return true;
+    }
+    return false;
+  }, [loadFromUrl]);
+
+  // Auto-load last URL saved on this device or local bundled playlist
+  useEffect(() => {
+    let active = true;
+
+    const bootstrapCatalog = async () => {
+      if (catalog.isLoaded) {
+        if (active) setIsBootstrapping(false);
+        return;
+      }
+
+      if (m3uUrl) {
+        await loadFromUrl(m3uUrl);
+      } else {
+        await loadFromLocalPlaylist();
+      }
+
+      if (active) setIsBootstrapping(false);
+    };
+
+    void bootstrapCatalog();
+
+    return () => {
+      active = false;
+    };
+  }, [catalog.isLoaded, m3uUrl, loadFromLocalPlaylist, loadFromUrl]);
 
   const toggleFavorite = useCallback((id: string) => {
     setFavorites(prev => {
@@ -170,7 +248,7 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <ContentContext.Provider value={{
-      catalog, isLoading, error, loadFromUrl, loadFromText,
+      catalog, isLoading, isBootstrapping, error, loadFromUrl, loadFromText, loadFromZipBuffer,
       favorites, toggleFavorite, isFavorite, searchContent,
       getMovieById, getSeriesById, m3uUrl,
     }}>

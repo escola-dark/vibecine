@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
   Home, Film, Tv, Heart, Search, Upload, LogOut,
@@ -23,6 +23,12 @@ export function DashboardSidebar() {
   const [collapsed, setCollapsed] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const { logout, isAdmin } = useAuth();
+
+  useEffect(() => {
+    if (location.pathname.startsWith('/search')) {
+      setCollapsed(true);
+    }
+  }, [location.pathname]);
 
   // Get unique groups/categories
   const movieGroups = useMemo(() => {

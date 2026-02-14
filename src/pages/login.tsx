@@ -1,11 +1,10 @@
 import { FormEvent, useState } from 'react';
 import heroBg from '@/assets/hero-bg.jpg';
 import { useAuth } from '@/contexts/AuthContext';
-import { ADMIN_EMAIL } from '@/lib/firebase';
 
 export default function LoginPage() {
   const { login, isSigningIn, error } = useAuth();
-  const [email, setEmail] = useState(ADMIN_EMAIL);
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [rememberMe, setRememberMe] = useState(true);
 
@@ -22,10 +21,10 @@ export default function LoginPage() {
       <div className="absolute inset-0 bg-background/80" />
       <div className="relative z-10 w-full max-w-md rounded-xl border border-border bg-card p-6 shadow-card">
         <h1 className="text-3xl font-bold text-primary mb-2" style={{ fontFamily: "'Bebas Neue', sans-serif" }}>
-          VIBECINES ADMIN
+          VIBECINES
         </h1>
         <p className="text-sm text-muted-foreground mb-6">
-          Faça login com o administrador para acessar o dashboard e importar a M3U.
+          Faça login para acessar o dashboard. Apenas o admin pode importar/atualizar a lista M3U.
         </p>
 
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -67,7 +66,7 @@ export default function LoginPage() {
             disabled={isSigningIn}
             className="w-full rounded-lg bg-primary text-primary-foreground py-3 font-medium disabled:opacity-60"
           >
-            {isSigningIn ? 'Entrando...' : 'Entrar como Admin'}
+            {isSigningIn ? 'Entrando...' : 'Entrar'}
           </button>
         </form>
       </div>

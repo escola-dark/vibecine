@@ -10,6 +10,30 @@ const WatchPage = () => {
 
   // Find in all items
   const item = id ? (getMovieById(id) || catalog.allItems.find(i => i.id === id)) : undefined;
+  const playlist = item?.type === 'series' && item.seriesId
+    ? catalog.series
+      .find(s => s.id === item.seriesId)
+      ?.seasons
+    : undefined;
+
+  const orderedEpisodes = playlist
+    ? Object.keys(playlist)
+      .map(Number)
+      .sort((a, b) => a - b)
+      .flatMap(season => [...playlist[season]].sort((a, b) => (a.episodeNumber || 0) - (b.episodeNumber || 0)))
+    : [];
+
+  const currentIndex = orderedEpisodes.findIndex(ep => ep.id === item?.id);
+
+  const handleEpisodeEnd = () => {
+    if (currentIndex === -1) return;
+    const next = orderedEpisodes[currentIndex + 1];
+    if (next) {
+      navigate(`/watch/${next.id}`);
+    }
+  };
+
+  const hasNextEpisode = currentIndex !== -1 && !!orderedEpisodes[currentIndex + 1];
 
   if (!item) {
     return (
@@ -26,7 +50,14 @@ const WatchPage = () => {
 
   return (
     <div className="min-h-screen bg-black">
-      <VideoPlayer url={item.url} title={item.title} contentId={item.id} />
+      <VideoPlayer
+        url={item.url}
+        title={item.title}
+        contentId={item.id}
+        isSeries={item.type === 'series'}
+        hasNextEpisode={hasNextEpisode}
+        onEnded={item.type === 'series' ? handleEpisodeEnd : undefined}
+      />
     </div>
   );
 };

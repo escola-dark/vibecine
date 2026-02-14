@@ -47,7 +47,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       await signInWithEmailAndPassword(auth, email.trim(), password);
       return true;
     } catch {
-      setError('Falha no login. Verifique seu usuário e senha no Firebase Auth.');
+      setError('Falha no login. Verifique seu usuário e senha.');
       return false;
     } finally {
       setIsSigningIn(false);

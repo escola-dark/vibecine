@@ -1,25 +1,15 @@
 import { ReactNode } from 'react';
-import { DashboardSidebar } from './DashboardSidebar';
-import { useContent } from '@/contexts/ContentContext';
+import { Navbar } from './Navbar';
 
 interface DashboardLayoutProps {
   children: ReactNode;
-  fullWidth?: boolean;
 }
 
-export function DashboardLayout({ children, fullWidth }: DashboardLayoutProps) {
-  const { catalog } = useContent();
-
-  if (!catalog.isLoaded) {
-    return <>{children}</>;
-  }
-
+export function DashboardLayout({ children }: DashboardLayoutProps) {
   return (
-    <div className="flex min-h-screen w-full">
-      <DashboardSidebar />
-      <main className="flex-1 ml-[68px] lg:ml-[240px] transition-all duration-300">
-        {children}
-      </main>
+    <div className="min-h-screen w-full">
+      <Navbar />
+      <main className="pt-16 md:pt-20 overflow-x-hidden">{children}</main>
     </div>
   );
 }

@@ -1,4 +1,5 @@
 import { ContentItem, ContentType, Series, CatalogState } from '@/types/content';
+import JSZip from 'jszip';
 
 function generateId(str: string): string {
   let hash = 0;
@@ -8,6 +9,44 @@ function generateId(str: string): string {
     hash |= 0;
   }
   return Math.abs(hash).toString(36);
+}
+
+function normalizeTitle(title: string): string {
+  return title
+    .toLowerCase()
+    .replace(/\[(?:[^\]]*)\]/g, ' ')
+    .replace(/\b(4k|uhd|fhd|hd|dublado|dual\s*audio|legendado)\b/gi, ' ')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+function qualityScore(title: string): number {
+  const t = title.toLowerCase();
+  if (t.includes('[l]')) return 3;
+  if (t.includes('4k') || t.includes('uhd')) return 2;
+  return 1;
+}
+
+function dedupeItems(items: ContentItem[]): ContentItem[] {
+  const map = new Map<string, ContentItem>();
+
+  for (const item of items) {
+    const key = item.type === 'series'
+      ? `${item.seriesId || normalizeTitle(item.title)}|${item.seasonNumber || 1}|${item.episodeNumber || 0}`
+      : `${normalizeTitle(item.title)}|${item.group.toLowerCase()}`;
+
+    const existing = map.get(key);
+    if (!existing) {
+      map.set(key, item);
+      continue;
+    }
+
+    if (qualityScore(item.title) > qualityScore(existing.title)) {
+      map.set(key, item);
+    }
+  }
+
+  return [...map.values()];
 }
 
 function detectType(title: string, group: string): { type: ContentType; seasonNumber?: number; episodeNumber?: number; episodeTitle?: string; seriesTitle?: string } {
@@ -120,12 +159,14 @@ export function parseM3U(content: string): CatalogState {
     }
   }
 
+  const uniqueItems = dedupeItems(items);
+
   // Separate movies and series
-  const movies = items.filter(i => i.type === 'movie');
+  const movies = uniqueItems.filter(i => i.type === 'movie');
   
   // Group series episodes
   const seriesMap = new Map<string, Series>();
-  items.filter(i => i.type === 'series').forEach(item => {
+  uniqueItems.filter(i => i.type === 'series').forEach(item => {
     const sid = item.seriesId || item.id;
     if (!seriesMap.has(sid)) {
       // Extract series name from title
@@ -153,14 +194,14 @@ export function parseM3U(content: string): CatalogState {
     });
   });
 
-  const groups = [...new Set(items.map(i => i.group))].sort();
+  const groups = [...new Set(uniqueItems.map(i => i.group))].sort();
 
   return {
     movies,
     series: Array.from(seriesMap.values()),
-    allItems: items,
+    allItems: uniqueItems,
     groups,
-    isLoaded: items.length > 0,
+    isLoaded: uniqueItems.length > 0,
   };
 }
 
@@ -176,4 +217,35 @@ export async function fetchAndParseM3U(url: string): Promise<CatalogState> {
   }
 
   return parseM3U(text);
+}
+
+export async function extractM3UTextFromZipBuffer(zipData: ArrayBuffer): Promise<string> {
+  const zip = await JSZip.loadAsync(zipData);
+  const entry = Object.values(zip.files).find(file => !file.dir && /\.m3u8?$/i.test(file.name));
+
+  if (!entry) {
+    throw new Error('ZIP inválido: nenhum arquivo .m3u/.m3u8 encontrado');
+  }
+
+  const text = await entry.async('string');
+  if (!text.includes('#EXTM3U') && !text.includes('#EXTINF')) {
+    throw new Error('Conteúdo M3U inválido dentro do ZIP');
+  }
+
+  return text;
+}
+
+export async function parseM3UFromZipBuffer(zipData: ArrayBuffer): Promise<CatalogState> {
+  const text = await extractM3UTextFromZipBuffer(zipData);
+  return parseM3U(text);
+}
+
+export async function fetchAndParseM3UZip(url: string): Promise<CatalogState> {
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`Falha ao baixar ZIP M3U: ${response.status}`);
+  }
+
+  const buffer = await response.arrayBuffer();
+  return parseM3UFromZipBuffer(buffer);
 }
