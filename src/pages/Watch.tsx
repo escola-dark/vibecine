@@ -24,8 +24,8 @@ const WatchPage = () => {
   }
 
   return (
-    <div className="min-h-screen bg-black md:bg-background">
-      <div className="mx-auto w-full max-w-6xl">
+    <div className="min-h-screen bg-black md:bg-background flex items-center justify-center px-0 md:px-4 py-4 md:py-8">
+      <div className="w-full max-w-6xl">
         <VideoPlayer url={item.url} title={item.title} contentId={item.id} />
 
         <div className="px-4 py-4 md:px-6 md:py-6 bg-black md:bg-card/70 border-t md:border border-border/40 text-foreground">
