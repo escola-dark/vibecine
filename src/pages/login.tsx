@@ -39,7 +39,7 @@ export default function LoginPage() {
           VIBECINES
         </h1>
         <p className="text-sm text-muted-foreground mb-6">
-          Faça login para acessar acessar o acervo de filmes e séries. 
+          Faça login para acessar o acervo de filmes e séries. 
         </p>
 
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -89,3 +89,4 @@ export default function LoginPage() {
   );
 
 }
+
