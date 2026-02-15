@@ -11,7 +11,19 @@ export function DashboardHero() {
 
   // Pick 5 featured items for slideshow
   const featured = useMemo(() => {
-    const pool = catalog.movies.filter(m => m.logo).slice(0, 50);
+    const extractYear = (text: string) => {
+      const years = text.match(/\b(?:19|20)\d{2}\b/g);
+      if (!years?.length) return null;
+      return Math.max(...years.map(Number));
+    };
+
+    const pool = catalog.movies
+      .filter((m) => {
+        if (!m.logo) return false;
+        const year = extractYear(`${m.title} ${m.group}`);
+        return year !== null && year >= 2025;
+      })
+      .slice(0, 50);
     const shuffled = [...pool].sort(() => Math.random() - 0.5);
     return shuffled.slice(0, Math.min(5, shuffled.length));
   }, [catalog.movies]);
@@ -29,8 +41,8 @@ export function DashboardHero() {
   const current = featured[currentIdx];
 
   if (!current) {
-    // Fallback if no movies with logos
-    const fallback = catalog.movies[0];
+    // Fallback only to movies with logo to keep homepage visuals consistent.
+    const fallback = catalog.movies.find((movie) => typeof movie.logo === 'string' && movie.logo.trim().length > 0);
     if (!fallback) return null;
     return <FallbackHero item={fallback} />;
   }

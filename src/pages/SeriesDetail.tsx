@@ -1,12 +1,16 @@
 import { useParams, useNavigate } from 'react-router-dom';
 import { useContent } from '@/contexts/ContentContext';
 import { ArrowLeft, CheckCircle2, Heart, Play } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 const SeriesDetailPage = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { getSeriesById, toggleFavorite, isFavorite } = useContent();
+
+  useEffect(() => {
+    window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+  }, [id]);
 
   const series = id ? getSeriesById(id) : undefined;
   const seasons = series ? Object.keys(series.seasons).map(Number).sort((a, b) => a - b) : [];

@@ -1,9 +1,9 @@
-import { ContentItem, ContentType, Series, CatalogState } from '@/types/content';
+﻿import { CatalogState, ContentItem, ContentType, Series } from '@/types/content';
 import JSZip from 'jszip';
 
 function generateId(str: string): string {
   let hash = 0;
-  for (let i = 0; i < str.length; i++) {
+  for (let i = 0; i < str.length; i += 1) {
     const char = str.charCodeAt(i);
     hash = ((hash << 5) - hash) + char;
     hash |= 0;
@@ -49,37 +49,122 @@ function dedupeItems(items: ContentItem[]): ContentItem[] {
   return [...map.values()];
 }
 
-function detectType(title: string, group: string): { type: ContentType; seasonNumber?: number; episodeNumber?: number; episodeTitle?: string; seriesTitle?: string } {
-  const lower = (group + ' ' + title).toLowerCase();
+function splitExtInfLine(line: string): { metadata: string; displayTitle: string } {
+  let inQuotes = false;
 
-  // Filter out live TV channels
+  for (let i = 0; i < line.length; i += 1) {
+    const char = line[i];
+    if (char === '"') {
+      inQuotes = !inQuotes;
+      continue;
+    }
+
+    if (char === ',' && !inQuotes) {
+      return {
+        metadata: line.slice(0, i),
+        displayTitle: line.slice(i + 1),
+      };
+    }
+  }
+
+  const fallbackComma = line.lastIndexOf(',');
+  if (fallbackComma !== -1) {
+    return {
+      metadata: line.slice(0, fallbackComma),
+      displayTitle: line.slice(fallbackComma + 1),
+    };
+  }
+
+  return {
+    metadata: line,
+    displayTitle: '',
+  };
+}
+
+function parseExtInfAttributes(metadata: string): Record<string, string> {
+  const attrs: Record<string, string> = {};
+  const attrRegex = /([\w-]+)="([^"]*)"/g;
+  let match: RegExpExecArray | null;
+
+  while ((match = attrRegex.exec(metadata)) !== null) {
+    attrs[match[1].toLowerCase()] = match[2].trim();
+  }
+
+  return attrs;
+}
+
+function escapeRegex(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function extractAttribute(metadata: string, attrs: Record<string, string>, key: string): string {
+  const direct = attrs[key];
+  if (direct) return direct;
+
+  const looseRegex = new RegExp(`${escapeRegex(key)}="([^,]*)`, 'i');
+  const looseMatch = metadata.match(looseRegex);
+  return looseMatch?.[1]?.trim() || '';
+}
+
+function sanitizeExtInfText(value: string): string {
+  return value
+    .replace(/(?:\s|")*(?:tvg-[\w-]+|group-title)\s*=\s*"[^"]*"?.*$/i, '')
+    .replace(/\s{2,}/g, ' ')
+    .replace(/^[\s"']+|[\s"']+$/g, '')
+    .trim();
+}
+
+function isPollutedWithAttributes(value: string): boolean {
+  return /\b(?:tvg-name|tvg-logo|group-title)\s*=/i.test(value);
+}
+
+function resolvePreferredTitle(rawDisplayTitle: string, parsedDisplayTitle: string, tvgName: string): string {
+  if (!parsedDisplayTitle) return tvgName;
+  if (isPollutedWithAttributes(rawDisplayTitle) && tvgName) return tvgName;
+  return parsedDisplayTitle;
+}
+
+function detectType(title: string, group: string): {
+  type: ContentType;
+  seasonNumber?: number;
+  episodeNumber?: number;
+  episodeTitle?: string;
+  seriesTitle?: string;
+} {
+  const lower = `${group} ${title}`.toLowerCase();
+
   const liveKeywords = ['ao vivo', '24h', 'canais', 'tv ao vivo', 'live', 'linear'];
-  if (liveKeywords.some(kw => lower.includes(kw))) {
+  if (liveKeywords.some((kw) => lower.includes(kw))) {
     return { type: 'movie' };
   }
 
-  // Series detection: S01E01, S01 E01, 1x01, T01E01 patterns
   const seriesPatterns = [
     /S(\d{1,2})\s*E(\d{1,3})/i,
     /T(\d{1,2})\s*E(\d{1,3})/i,
     /(\d{1,2})x(\d{1,3})/i,
-    /temporada\s*(\d{1,2}).*epis[oó]dio\s*(\d{1,3})/i,
+    /temporada\s*(\d{1,2}).*epis[o\u00F3]dio\s*(\d{1,3})/i,
   ];
 
   for (const pattern of seriesPatterns) {
     const match = title.match(pattern);
-    if (match) {
-      const seasonNumber = parseInt(match[1]);
-      const episodeNumber = parseInt(match[2]);
-      // Extract series title (everything before the season/episode pattern)
-      const seriesTitle = title.substring(0, title.search(pattern)).replace(/[-–—\s]+$/, '').trim();
-      const episodeTitle = title.substring(title.search(pattern) + match[0].length).replace(/^[-–—\s]+/, '').trim();
-      return { type: 'series', seasonNumber, episodeNumber, episodeTitle, seriesTitle: seriesTitle || title };
-    }
+    if (!match) continue;
+
+    const seasonNumber = parseInt(match[1], 10);
+    const episodeNumber = parseInt(match[2], 10);
+    const markerIndex = title.search(pattern);
+    const seriesTitle = title.substring(0, markerIndex).replace(/[-\u2013\u2014\s]+$/, '').trim();
+    const episodeTitle = title.substring(markerIndex + match[0].length).replace(/^[-\u2013\u2014\s]+/, '').trim();
+
+    return {
+      type: 'series',
+      seasonNumber,
+      episodeNumber,
+      episodeTitle,
+      seriesTitle: seriesTitle || title,
+    };
   }
 
-  // Check group for series hints
-  if (lower.includes('séri') || lower.includes('serie') || lower.includes('series')) {
+  if (lower.includes('s\u00E9ri') || lower.includes('serie') || lower.includes('series')) {
     return { type: 'series', seasonNumber: 1, episodeNumber: 1, seriesTitle: title };
   }
 
@@ -89,88 +174,92 @@ function detectType(title: string, group: string): { type: ContentType; seasonNu
 export function parseM3U(content: string): CatalogState {
   const lines = content.split('\n');
   const items: ContentItem[] = [];
-  
+
   let currentTitle = '';
   let currentLogo = '';
   let currentGroup = '';
 
-  for (let i = 0; i < lines.length; i++) {
+  for (let i = 0; i < lines.length; i += 1) {
     const line = lines[i].trim();
 
     if (line.startsWith('#EXTINF:')) {
-      // Parse EXTINF line
-      const logoMatch = line.match(/tvg-logo="([^"]*)"/);
-      const groupMatch = line.match(/group-title="([^"]*)"/);
-      const titleMatch = line.match(/,(.+)$/);
+      const { metadata, displayTitle } = splitExtInfLine(line);
+      const attrs = parseExtInfAttributes(metadata);
 
-      currentLogo = logoMatch?.[1] || '';
-      currentGroup = groupMatch?.[1] || 'Sem Categoria';
-      currentTitle = titleMatch?.[1]?.trim() || 'Sem Título';
-    } else if (line && !line.startsWith('#') && (line.startsWith('http') || line.startsWith('rtmp'))) {
-      // This is a URL line
-      const groupLower = currentGroup.toLowerCase();
-      
-      const titleLower = currentTitle.toLowerCase();
-      const combinedLower = groupLower + ' ' + titleLower;
+      const rawDisplayTitle = displayTitle.trim();
+      const parsedDisplayTitle = sanitizeExtInfText(rawDisplayTitle);
+      const parsedTvgName = sanitizeExtInfText(extractAttribute(metadata, attrs, 'tvg-name'));
 
-      // Skip live TV channels
-      const liveKeywords = ['ao vivo', '24h', 'canais', 'tv ', 'aberto', 'live', 'aberta', 'canal', 'open tv', 'ppv', 'pay per view', '24 horas', 'linear'];
-      if (liveKeywords.some(kw => combinedLower.includes(kw))) {
-        currentTitle = '';
-        currentLogo = '';
-        currentGroup = '';
-        continue;
-      }
+      currentTitle = resolvePreferredTitle(rawDisplayTitle, parsedDisplayTitle, parsedTvgName) || 'Sem T\u00EDtulo';
+      currentLogo = sanitizeExtInfText(extractAttribute(metadata, attrs, 'tvg-logo'));
+      currentGroup = sanitizeExtInfText(extractAttribute(metadata, attrs, 'group-title')) || 'Sem Categoria';
+      continue;
+    }
 
-      // Skip adult content
-      const adultKeywords = ['adult', 'adulto', 'xxx', 'porn', 'erotic', 'erótic', 'sexy', 'sex ', '+18', '18+', 'hentai', 'playboy', 'hustler', 'brazzers', 'bangbros', 'naughty', 'milf', 'lesbian', 'gay ', 'strip', 'onlyfans', 'cam girl', 'nude', 'naked', 'fetish', 'bdsm', 'hardcore', 'softcore', 'xvideos', 'xhamster', 'redtube', 'youporn', 'penthouse', 'vivid', 'hot girls', 'after dark', 'midnight', 'meia-noite', 'proibido'];
-      if (adultKeywords.some(kw => combinedLower.includes(kw))) {
-        currentTitle = '';
-        currentLogo = '';
-        currentGroup = '';
-        continue;
-      }
+    if (!line || line.startsWith('#') || (!line.startsWith('http') && !line.startsWith('rtmp'))) {
+      continue;
+    }
 
-      const detected = detectType(currentTitle, currentGroup);
-      
-      const item: ContentItem = {
-        id: generateId(currentTitle + line),
-        title: currentTitle,
-        url: line,
-        logo: currentLogo || undefined,
-        group: currentGroup,
-        type: detected.type,
-        seasonNumber: detected.seasonNumber,
-        episodeNumber: detected.episodeNumber,
-        episodeTitle: detected.episodeTitle,
-        seriesId: detected.seriesTitle ? generateId(detected.seriesTitle) : undefined,
-      };
+    const groupLower = currentGroup.toLowerCase();
+    const titleLower = currentTitle.toLowerCase();
+    const combinedLower = `${groupLower} ${titleLower}`;
 
-      // Override title for series to be the series name
-      if (detected.seriesTitle) {
-        item.seriesId = generateId(detected.seriesTitle);
-      }
-
-      items.push(item);
-
+    const liveKeywords = ['ao vivo', '24h', 'canais', 'tv ', 'aberto', 'live', 'aberta', 'canal', 'open tv', 'ppv', 'pay per view', '24 horas', 'linear'];
+    if (liveKeywords.some((kw) => combinedLower.includes(kw))) {
       currentTitle = '';
       currentLogo = '';
       currentGroup = '';
+      continue;
     }
+
+    const adultKeywords = ['adult', 'adulto', 'xxx', 'porn', 'erotic', 'erotico', 'er\u00F3tico', 'sexy', 'sex ', '+18', '18+', 'hentai', 'playboy', 'hustler', 'brazzers', 'bangbros', 'naughty', 'milf', 'lesbian', 'gay ', 'strip', 'onlyfans', 'cam girl', 'nude', 'naked', 'fetish', 'bdsm', 'hardcore', 'softcore', 'xvideos', 'xhamster', 'redtube', 'youporn', 'penthouse', 'vivid', 'hot girls', 'after dark', 'midnight', 'meia-noite', 'proibido'];
+    if (adultKeywords.some((kw) => combinedLower.includes(kw))) {
+      currentTitle = '';
+      currentLogo = '';
+      currentGroup = '';
+      continue;
+    }
+
+    const detected = detectType(currentTitle, currentGroup);
+
+    const item: ContentItem = {
+      id: generateId(currentTitle + line),
+      title: currentTitle,
+      url: line,
+      logo: currentLogo || undefined,
+      group: currentGroup,
+      type: detected.type,
+      seasonNumber: detected.seasonNumber,
+      episodeNumber: detected.episodeNumber,
+      episodeTitle: detected.episodeTitle,
+      seriesId: detected.seriesTitle ? generateId(detected.seriesTitle) : undefined,
+    };
+
+    if (detected.seriesTitle) {
+      item.seriesId = generateId(detected.seriesTitle);
+    }
+
+    items.push(item);
+
+    currentTitle = '';
+    currentLogo = '';
+    currentGroup = '';
   }
 
   const uniqueItems = dedupeItems(items);
+  const movies = uniqueItems.filter((i) => i.type === 'movie');
 
-  // Separate movies and series
-  const movies = uniqueItems.filter(i => i.type === 'movie');
-  
-  // Group series episodes
   const seriesMap = new Map<string, Series>();
-  uniqueItems.filter(i => i.type === 'series').forEach(item => {
+  uniqueItems.filter((i) => i.type === 'series').forEach((item) => {
     const sid = item.seriesId || item.id;
     if (!seriesMap.has(sid)) {
-      // Extract series name from title
-      const seriesTitle = item.title.replace(/S\d{1,2}\s*E\d{1,3}/i, '').replace(/T\d{1,2}\s*E\d{1,3}/i, '').replace(/\d{1,2}x\d{1,3}/i, '').replace(/[-–—\s]+$/, '').trim() || item.title;
+      const seriesTitle = item.title
+        .replace(/S\d{1,2}\s*E\d{1,3}/i, '')
+        .replace(/T\d{1,2}\s*E\d{1,3}/i, '')
+        .replace(/\d{1,2}x\d{1,3}/i, '')
+        .replace(/[-\u2013\u2014\s]+$/, '')
+        .trim() || item.title;
+
       seriesMap.set(sid, {
         id: sid,
         title: seriesTitle,
@@ -180,21 +269,22 @@ export function parseM3U(content: string): CatalogState {
         seasons: {},
       });
     }
+
     const series = seriesMap.get(sid)!;
     if (!series.logo && item.logo) series.logo = item.logo;
+
     const season = item.seasonNumber || 1;
     if (!series.seasons[season]) series.seasons[season] = [];
     series.seasons[season].push(item);
   });
 
-  // Sort episodes within each season
-  seriesMap.forEach(s => {
-    Object.keys(s.seasons).forEach(season => {
-      s.seasons[Number(season)].sort((a, b) => (a.episodeNumber || 0) - (b.episodeNumber || 0));
+  seriesMap.forEach((series) => {
+    Object.keys(series.seasons).forEach((season) => {
+      series.seasons[Number(season)].sort((a, b) => (a.episodeNumber || 0) - (b.episodeNumber || 0));
     });
   });
 
-  const groups = [...new Set(uniqueItems.map(i => i.group))].sort();
+  const groups = [...new Set(uniqueItems.map((i) => i.group))].sort();
 
   return {
     movies,
@@ -213,7 +303,7 @@ export async function fetchAndParseM3U(url: string): Promise<CatalogState> {
 
   const text = await response.text();
   if (!text.includes('#EXTM3U') && !text.includes('#EXTINF')) {
-    throw new Error('Conteúdo inválido: não parece uma lista M3U');
+    throw new Error('Conte\u00FAdo inv\u00E1lido: n\u00E3o parece uma lista M3U');
   }
 
   return parseM3U(text);
@@ -221,15 +311,15 @@ export async function fetchAndParseM3U(url: string): Promise<CatalogState> {
 
 export async function extractM3UTextFromZipBuffer(zipData: ArrayBuffer): Promise<string> {
   const zip = await JSZip.loadAsync(zipData);
-  const entry = Object.values(zip.files).find(file => !file.dir && /\.m3u8?$/i.test(file.name));
+  const entry = Object.values(zip.files).find((file) => !file.dir && /\.m3u8?$/i.test(file.name));
 
   if (!entry) {
-    throw new Error('ZIP inválido: nenhum arquivo .m3u/.m3u8 encontrado');
+    throw new Error('ZIP inv\u00E1lido: nenhum arquivo .m3u/.m3u8 encontrado');
   }
 
   const text = await entry.async('string');
   if (!text.includes('#EXTM3U') && !text.includes('#EXTINF')) {
-    throw new Error('Conteúdo M3U inválido dentro do ZIP');
+    throw new Error('Conte\u00FAdo M3U inv\u00E1lido dentro do ZIP');
   }
 
   return text;
