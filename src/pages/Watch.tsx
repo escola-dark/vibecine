@@ -8,11 +8,36 @@ const WatchPage = () => {
   const navigate = useNavigate();
   const { getMovieById, catalog } = useContent();
 
-  const item = id ? getMovieById(id) || catalog.allItems.find((i) => i.id === id) : undefined;
+  // Find in all items
+  const item = id ? (getMovieById(id) || catalog.allItems.find(i => i.id === id)) : undefined;
+  const playlist = item?.type === 'series' && item.seriesId
+    ? catalog.series
+      .find(s => s.id === item.seriesId)
+      ?.seasons
+    : undefined;
+
+  const orderedEpisodes = playlist
+    ? Object.keys(playlist)
+      .map(Number)
+      .sort((a, b) => a - b)
+      .flatMap(season => [...playlist[season]].sort((a, b) => (a.episodeNumber || 0) - (b.episodeNumber || 0)))
+    : [];
+
+  const currentIndex = orderedEpisodes.findIndex(ep => ep.id === item?.id);
+
+  const handleEpisodeEnd = () => {
+    if (currentIndex === -1) return;
+    const next = orderedEpisodes[currentIndex + 1];
+    if (next) {
+      navigate(`/watch/${next.id}`);
+    }
+  };
+
+  const hasNextEpisode = currentIndex !== -1 && !!orderedEpisodes[currentIndex + 1];
 
   if (!item) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-background">
+      <div className="min-h-screen flex items-center justify-center">
         <div className="text-center">
           <p className="text-muted-foreground mb-4">Conteúdo não encontrado</p>
           <button onClick={() => navigate('/')} className="text-primary hover:underline flex items-center gap-1 mx-auto">
@@ -24,17 +49,15 @@ const WatchPage = () => {
   }
 
   return (
-    <div className="min-h-screen bg-black md:bg-background flex items-center justify-center px-0 md:px-4 py-4 md:py-8">
-      <div className="w-full max-w-6xl">
-        <VideoPlayer url={item.url} title={item.title} contentId={item.id} />
-
-        <div className="px-4 py-4 md:px-6 md:py-6 bg-black md:bg-card/70 border-t md:border border-border/40 text-foreground">
-          <h1 className="text-base md:text-xl font-semibold line-clamp-2">{item.title}</h1>
-          <p className="text-xs md:text-sm text-muted-foreground mt-1">
-            Toque no vídeo para exibir os controles. Em dispositivos móveis, use tela cheia para melhor experiência.
-          </p>
-        </div>
-      </div>
+    <div className="min-h-screen bg-black">
+      <VideoPlayer
+        url={item.url}
+        title={item.title}
+        contentId={item.id}
+        isSeries={item.type === 'series'}
+        hasNextEpisode={hasNextEpisode}
+        onEnded={item.type === 'series' ? handleEpisodeEnd : undefined}
+      />
     </div>
   );
 };

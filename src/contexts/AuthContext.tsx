@@ -6,7 +6,6 @@ import {
   setPersistence,
   signInWithEmailAndPassword,
   signOut,
-  updateProfile,
   User,
 } from 'firebase/auth';
 import { ADMIN_EMAIL, auth } from '@/lib/firebase';
@@ -18,10 +17,8 @@ interface AuthContextType {
   isCheckingAuth: boolean;
   isSigningIn: boolean;
   error: string | null;
-  profileName: string;
   login: (email: string, password: string, rememberMe: boolean) => Promise<boolean>;
   logout: () => Promise<void>;
-  updateProfileName: (name: string) => Promise<boolean>;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
@@ -31,12 +28,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [isCheckingAuth, setIsCheckingAuth] = useState(true);
   const [isSigningIn, setIsSigningIn] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [profileName, setProfileName] = useState('');
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
-      setProfileName(currentUser?.displayName || '');
       setIsCheckingAuth(false);
     });
 
@@ -63,24 +58,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await signOut(auth);
   };
 
-  const updateProfileName = async (name: string) => {
-    const trimmed = name.trim();
-    if (!auth.currentUser || !trimmed) {
-      setError('Informe um nome válido para salvar.');
-      return false;
-    }
-
-    try {
-      await updateProfile(auth.currentUser, { displayName: trimmed });
-      setProfileName(trimmed);
-      setError(null);
-      return true;
-    } catch {
-      setError('Não foi possível salvar o nome. Tente novamente.');
-      return false;
-    }
-  };
-
   const value = useMemo<AuthContextType>(
     () => ({
       user,
@@ -89,12 +66,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       isCheckingAuth,
       isSigningIn,
       error,
-      profileName,
       login,
       logout,
-      updateProfileName,
     }),
-    [user, isCheckingAuth, isSigningIn, error, profileName],
+    [user, isCheckingAuth, isSigningIn, error],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
