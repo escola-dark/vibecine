@@ -1,16 +1,12 @@
 import { useParams, useNavigate } from 'react-router-dom';
 import { useContent } from '@/contexts/ContentContext';
 import { ArrowLeft, CheckCircle2, Heart, Play } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 
 const SeriesDetailPage = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { getSeriesById, toggleFavorite, isFavorite } = useContent();
-
-  useEffect(() => {
-    window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
-  }, [id]);
 
   const series = id ? getSeriesById(id) : undefined;
   const seasons = series ? Object.keys(series.seasons).map(Number).sort((a, b) => a - b) : [];
@@ -97,8 +93,8 @@ const SeriesDetailPage = () => {
               className={`w-full flex items-center gap-3 sm:gap-4 p-3 sm:p-4 rounded-xl transition-colors text-left group ${watched ? 'bg-card/60 border border-primary/20' : 'bg-card hover:bg-secondary border border-border/60'}`}
             >
               <div className="w-20 sm:w-24 aspect-video rounded-md overflow-hidden bg-secondary flex-shrink-0">
-                {ep.logo || series.logo ? (
-                  <img src={ep.logo || series.logo} alt={ep.title} className="w-full h-full object-cover" />
+                {series.logo || ep.logo ? (
+                  <img src={series.logo || ep.logo} alt={ep.title} className="w-full h-full object-cover" />
                 ) : (
                   <div className="w-full h-full grid place-items-center text-[10px] text-muted-foreground">EP</div>
                 )}

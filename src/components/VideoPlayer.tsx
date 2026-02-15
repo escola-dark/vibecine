@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+﻿import { type ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Hls from 'hls.js';
 import { ArrowLeft, Loader2, Maximize, Minimize, Pause, Play, SkipForward, Volume2, VolumeX } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
@@ -15,7 +15,13 @@ interface VideoPlayerProps {
 export function VideoPlayer({ url, title, contentId, onEnded, isSeries = false, hasNextEpisode = false }: VideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const hlsRef = useRef<Hls | null>(null);
+  const resumeAtRef = useRef<number | null>(null);
+  const lastSavedSecondRef = useRef<number>(-1);
+  const hideTimeout = useRef<ReturnType<typeof setTimeout>>();
+
   const navigate = useNavigate();
+
   const [playing, setPlaying] = useState(false);
   const [muted, setMuted] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -23,196 +29,188 @@ export function VideoPlayer({ url, title, contentId, onEnded, isSeries = false, 
   const [showControls, setShowControls] = useState(true);
   const [fullscreen, setFullscreen] = useState(false);
   const [loading, setLoading] = useState(true);
-  const hideTimeout = useRef<ReturnType<typeof setTimeout>>();
+  const [playerError, setPlayerError] = useState<string | null>(null);
 
   const remainingSeconds = Math.max(0, Math.ceil((duration || 0) - progress));
   const showNextPrompt = isSeries && hasNextEpisode && duration > 0 && remainingSeconds <= 15;
+  const isHlsStream = /\.m3u8($|\?)/i.test(url);
 
-  const isMobileViewport = () => window.matchMedia('(max-width: 1023px)').matches;
+  const destroyHls = useCallback(() => {
+    if (!hlsRef.current) return;
+    hlsRef.current.destroy();
+    hlsRef.current = null;
+  }, []);
 
-  const requestMobileFullscreen = async () => {
-    const video = videoRef.current as (HTMLVideoElement & {
-      webkitEnterFullscreen?: () => void;
-      webkitRequestFullscreen?: () => Promise<void> | void;
-    }) | null;
-    const container = containerRef.current as (HTMLDivElement & {
-      webkitRequestFullscreen?: () => Promise<void> | void;
-    }) | null;
-    const fullscreenDoc = document as Document & { webkitFullscreenElement?: Element };
-
-    if (!video || !container) return;
-
-    try {
-      if (!fullscreenDoc.fullscreenElement && !fullscreenDoc.webkitFullscreenElement) {
-        if (video.requestFullscreen) {
-          await video.requestFullscreen();
-        } else if (container.requestFullscreen) {
-          await container.requestFullscreen();
-        } else if (video.webkitRequestFullscreen) {
-          await video.webkitRequestFullscreen();
-        } else if (container.webkitRequestFullscreen) {
-          await container.webkitRequestFullscreen();
-        } else if (video.webkitEnterFullscreen) {
-          video.webkitEnterFullscreen();
-        }
-        setFullscreen(true);
-      }
-
-      const orientation = (screen as { orientation?: { lock?: (value: string) => Promise<void> } }).orientation;
-      if (orientation?.lock) {
-        await orientation.lock('landscape');
-      }
-    } catch {
-      // Ignore browser limitations
-    }
-  };
-
-  const playVideo = async () => {
-    const video = videoRef.current;
-    if (!video) return;
+  const playVideo = useCallback(async (video: HTMLVideoElement) => {
     try {
       await video.play();
-      setPlaying(true);
+      return;
     } catch {
-      // autoplay may be blocked by browser policy
+      // Autoplay may fail with audio on mobile. Try muted fallback.
     }
-  };
+
+    if (video.muted) return;
+
+    try {
+      video.muted = true;
+      setMuted(true);
+      await video.play();
+    } catch {
+      // Playback still blocked and will require user interaction.
+    }
+  }, []);
+
+  const scheduleAutoHide = useCallback(() => {
+    if (hideTimeout.current) clearTimeout(hideTimeout.current);
+    if (!playing) return;
+    hideTimeout.current = setTimeout(() => setShowControls(false), 3000);
+  }, [playing]);
 
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
 
-    const saved = localStorage.getItem(`vibecines_progress_${contentId}`);
-    if (saved) {
-      video.currentTime = parseFloat(saved);
+    destroyHls();
+    setPlayerError(null);
+    setPlaying(false);
+    setProgress(0);
+    setDuration(0);
+    setLoading(true);
+    setShowControls(true);
+    lastSavedSecondRef.current = -1;
+
+    video.pause();
+    video.removeAttribute('src');
+    video.load();
+
+    video.setAttribute('playsinline', 'true');
+    video.setAttribute('webkit-playsinline', 'true');
+    video.setAttribute('x5-playsinline', 'true');
+    video.preload = 'auto';
+    video.playsInline = true;
+    video.autoplay = true;
+
+    const saved = Number.parseFloat(localStorage.getItem(`vibecines_progress_${contentId}`) || '');
+    resumeAtRef.current = Number.isFinite(saved) && saved > 0 ? saved : null;
+
+    if (isHlsStream && Hls.isSupported()) {
+      const hls = new Hls({
+        enableWorker: true,
+        lowLatencyMode: true,
+        startFragPrefetch: true,
+        backBufferLength: 30,
+        maxBufferLength: 25,
+      });
+
+      hlsRef.current = hls;
+      hls.attachMedia(video);
+
+      hls.on(Hls.Events.MANIFEST_PARSED, () => {
+        void playVideo(video);
+      });
+
+      hls.on(Hls.Events.ERROR, (_, data) => {
+        if (!data.fatal) return;
+
+        if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+          hls.startLoad();
+          return;
+        }
+
+        if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+          hls.recoverMediaError();
+          return;
+        }
+
+        setPlayerError('Falha ao carregar este video.');
+        setLoading(false);
+      });
+
+      hls.loadSource(url);
+
+      return () => {
+        destroyHls();
+      };
     }
 
-    setLoading(true);
-
-    if (url.includes('.m3u8') && Hls.isSupported()) {
-      const hls = new Hls();
-      hls.loadSource(url);
-      hls.attachMedia(video);
-      hls.on(Hls.Events.MANIFEST_PARSED, () => {
-        void playVideo();
-      });
-      return () => hls.destroy();
+    if (isHlsStream && video.canPlayType('application/vnd.apple.mpegurl') === '') {
+      setPlayerError('Este navegador nao suporta o formato deste stream.');
+      setLoading(false);
+      return;
     }
 
     video.src = url;
-    void playVideo();
-  }, [url, contentId]);
+    video.load();
+    void playVideo(video);
+
+    return () => {
+      destroyHls();
+    };
+  }, [url, contentId, isHlsStream, destroyHls, playVideo]);
 
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
 
     const onTimeUpdate = () => {
-      setProgress(video.currentTime);
-      if (Math.floor(video.currentTime) % 5 === 0) {
-        localStorage.setItem(`vibecines_progress_${contentId}`, String(video.currentTime));
+      const currentTime = video.currentTime;
+      setProgress(currentTime);
+
+      const currentSecond = Math.floor(currentTime);
+      if (currentSecond >= 0 && currentSecond % 5 === 0 && currentSecond !== lastSavedSecondRef.current) {
+        lastSavedSecondRef.current = currentSecond;
+        localStorage.setItem(`vibecines_progress_${contentId}`, String(currentTime));
       }
     };
 
-    const onLoaded = () => setDuration(video.duration || 0);
+    const onLoadedMetadata = () => {
+      setDuration(video.duration || 0);
+
+      const resumeAt = resumeAtRef.current;
+      if (resumeAt && Number.isFinite(video.duration) && resumeAt < Math.max(video.duration - 1, 0)) {
+        video.currentTime = resumeAt;
+      }
+
+      resumeAtRef.current = null;
+    };
+
     const onCanPlay = () => setLoading(false);
     const onPlay = () => setPlaying(true);
     const onPause = () => setPlaying(false);
+    const onWaiting = () => setLoading(true);
+    const onPlaying = () => setLoading(false);
+    const onError = () => {
+      setLoading(false);
+      setPlayerError('Nao foi possivel reproduzir este video.');
+    };
+
     const onEndedHandler = () => {
       localStorage.setItem(`vibecines_watched_${contentId}`, '1');
       onEnded?.();
     };
 
     video.addEventListener('timeupdate', onTimeUpdate);
-    video.addEventListener('loadedmetadata', onLoaded);
+    video.addEventListener('loadedmetadata', onLoadedMetadata);
     video.addEventListener('canplay', onCanPlay);
     video.addEventListener('play', onPlay);
     video.addEventListener('pause', onPause);
+    video.addEventListener('waiting', onWaiting);
+    video.addEventListener('playing', onPlaying);
+    video.addEventListener('error', onError);
     video.addEventListener('ended', onEndedHandler);
 
     return () => {
       video.removeEventListener('timeupdate', onTimeUpdate);
-      video.removeEventListener('loadedmetadata', onLoaded);
+      video.removeEventListener('loadedmetadata', onLoadedMetadata);
       video.removeEventListener('canplay', onCanPlay);
       video.removeEventListener('play', onPlay);
       video.removeEventListener('pause', onPause);
+      video.removeEventListener('waiting', onWaiting);
+      video.removeEventListener('playing', onPlaying);
+      video.removeEventListener('error', onError);
       video.removeEventListener('ended', onEndedHandler);
     };
   }, [contentId, onEnded]);
-
-  const togglePlay = () => {
-    const video = videoRef.current;
-    if (!video) return;
-    if (video.paused) {
-      if (isMobileViewport()) {
-        void requestMobileFullscreen();
-      }
-      void video.play();
-    } else {
-      video.pause();
-    }
-  };
-
-  const seek = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const video = videoRef.current;
-    if (!video) return;
-    video.currentTime = parseFloat(e.target.value);
-  };
-
-  const skipToNextEpisode = () => {
-    localStorage.setItem(`vibecines_watched_${contentId}`, '1');
-    onEnded?.();
-  };
-
-  const toggleFullscreen = () => {
-    if (!containerRef.current) return;
-    const video = videoRef.current as (HTMLVideoElement & {
-      webkitDisplayingFullscreen?: boolean;
-      webkitEnterFullscreen?: () => void;
-      webkitExitFullscreen?: () => void;
-      webkitRequestFullscreen?: () => Promise<void> | void;
-    }) | null;
-    const fullscreenDoc = document as Document & { webkitFullscreenElement?: Element };
-    if (fullscreenDoc.fullscreenElement || fullscreenDoc.webkitFullscreenElement) {
-      void document.exitFullscreen();
-      setFullscreen(false);
-    } else if (video?.webkitDisplayingFullscreen && video.webkitExitFullscreen) {
-      video.webkitExitFullscreen();
-      setFullscreen(false);
-    } else {
-      if (video?.webkitEnterFullscreen) {
-        video.webkitEnterFullscreen();
-        setFullscreen(true);
-      } else if (containerRef.current.requestFullscreen) {
-        void containerRef.current.requestFullscreen();
-        setFullscreen(true);
-      } else if (video?.webkitRequestFullscreen) {
-        void video.webkitRequestFullscreen();
-        setFullscreen(true);
-      }
-    }
-  };
-
-  const handleMouseMove = () => {
-    setShowControls(true);
-    if (hideTimeout.current) clearTimeout(hideTimeout.current);
-    hideTimeout.current = setTimeout(() => setShowControls(false), 3000);
-  };
-
-  const formatTime = (t: number) => {
-    if (!Number.isFinite(t) || t < 0) return '00:00';
-    const total = Math.floor(t);
-    const h = Math.floor(total / 3600);
-    const m = Math.floor((total % 3600) / 60);
-    const s = total % 60;
-    if (h > 0) return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
-    return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
-  };
-
-  const progressPercent = useMemo(() => {
-    if (!duration || duration <= 0) return 0;
-    return Math.min(100, Math.max(0, (progress / duration) * 100));
-  }, [progress, duration]);
 
   useEffect(() => {
     const fullscreenDoc = document as Document & { webkitFullscreenElement?: Element };
@@ -239,14 +237,136 @@ export function VideoPlayer({ url, title, contentId, onEnded, isSeries = false, 
     };
   }, []);
 
+  useEffect(() => {
+    scheduleAutoHide();
+
+    return () => {
+      if (hideTimeout.current) clearTimeout(hideTimeout.current);
+    };
+  }, [playing, scheduleAutoHide]);
+
+  const togglePlay = () => {
+    const video = videoRef.current;
+    if (!video) return;
+
+    setPlayerError(null);
+
+    if (video.paused) {
+      void playVideo(video);
+    } else {
+      video.pause();
+    }
+  };
+
+  const seek = (e: ChangeEvent<HTMLInputElement>) => {
+    const video = videoRef.current;
+    if (!video) return;
+    video.currentTime = Number.parseFloat(e.target.value);
+  };
+
+  const skipToNextEpisode = () => {
+    localStorage.setItem(`vibecines_watched_${contentId}`, '1');
+    onEnded?.();
+  };
+
+  const toggleFullscreen = () => {
+    if (!containerRef.current) return;
+
+    const video = videoRef.current as (HTMLVideoElement & {
+      webkitDisplayingFullscreen?: boolean;
+      webkitEnterFullscreen?: () => void;
+      webkitExitFullscreen?: () => void;
+      webkitRequestFullscreen?: () => Promise<void> | void;
+    }) | null;
+
+    const fullscreenDoc = document as Document & {
+      webkitFullscreenElement?: Element;
+      webkitExitFullscreen?: () => Promise<void> | void;
+    };
+
+    if (fullscreenDoc.fullscreenElement || fullscreenDoc.webkitFullscreenElement) {
+      if (document.exitFullscreen) void document.exitFullscreen();
+      else if (fullscreenDoc.webkitExitFullscreen) void fullscreenDoc.webkitExitFullscreen();
+      setFullscreen(false);
+      return;
+    }
+
+    if (video?.webkitDisplayingFullscreen && video.webkitExitFullscreen) {
+      video.webkitExitFullscreen();
+      setFullscreen(false);
+      return;
+    }
+
+    if (containerRef.current.requestFullscreen) {
+      void containerRef.current.requestFullscreen();
+      setFullscreen(true);
+      return;
+    }
+
+    if (video?.webkitRequestFullscreen) {
+      void video.webkitRequestFullscreen();
+      setFullscreen(true);
+      return;
+    }
+
+    if (video?.webkitEnterFullscreen) {
+      video.webkitEnterFullscreen();
+      setFullscreen(true);
+    }
+  };
+
+  const handleUserActivity = () => {
+    setShowControls(true);
+    scheduleAutoHide();
+  };
+
+  const formatTime = (t: number) => {
+    if (!Number.isFinite(t) || t < 0) return '00:00';
+    const total = Math.floor(t);
+    const h = Math.floor(total / 3600);
+    const m = Math.floor((total % 3600) / 60);
+    const s = total % 60;
+    if (h > 0) return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+    return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+  };
+
+  const progressPercent = useMemo(() => {
+    if (!duration || duration <= 0) return 0;
+    return Math.min(100, Math.max(0, (progress / duration) * 100));
+  }, [progress, duration]);
+
   return (
     <div
       ref={containerRef}
       className="relative w-full bg-black h-[100svh] md:h-auto md:aspect-video"
-      onMouseMove={handleMouseMove}
+      onMouseMove={handleUserActivity}
+      onTouchStart={handleUserActivity}
       onClick={togglePlay}
     >
-      <video ref={videoRef} className="w-full h-full" muted={muted} />
+      <video
+        ref={videoRef}
+        className="w-full h-full"
+        muted={muted}
+        autoPlay
+        playsInline
+        preload="auto"
+        controls={false}
+        disablePictureInPicture
+        controlsList="nodownload noplaybackrate noremoteplayback"
+        onContextMenu={e => e.preventDefault()}
+      />
+
+      {loading && !playerError && (
+        <div className="absolute inset-0 z-10 flex items-center justify-center pointer-events-none">
+          <Loader2 className="w-10 h-10 animate-spin text-primary" />
+        </div>
+      )}
+
+      {playerError && (
+        <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/60 p-6 text-center pointer-events-none">
+          <p className="text-sm text-foreground/90">{playerError}</p>
+        </div>
+      )}
 
       <div
         className={`absolute inset-0 flex flex-col justify-between transition-opacity duration-300 ${
@@ -269,12 +389,12 @@ export function VideoPlayer({ url, title, contentId, onEnded, isSeries = false, 
 
         {showNextPrompt && (
           <div className="absolute right-4 bottom-20 z-20 rounded-lg bg-background/90 border border-border p-3 shadow-card">
-            <p className="text-xs text-muted-foreground mb-2">Próximo episódio em até {remainingSeconds}s</p>
+            <p className="text-xs text-muted-foreground mb-2">Proximo episodio em ate {remainingSeconds}s</p>
             <button
               onClick={skipToNextEpisode}
               className="inline-flex items-center gap-2 rounded-md bg-primary px-3 py-2 text-xs font-medium text-primary-foreground"
             >
-              <SkipForward className="w-4 h-4" /> Ir para próximo
+              <SkipForward className="w-4 h-4" /> Ir para proximo
             </button>
           </div>
         )}
@@ -291,6 +411,7 @@ export function VideoPlayer({ url, title, contentId, onEnded, isSeries = false, 
             }}
             className="w-full h-1 appearance-none rounded-full cursor-pointer"
           />
+
           <div className="flex items-center justify-between text-xs text-foreground/70">
             <span>{formatTime(progress)} / {formatTime(duration)}</span>
             <div className="flex items-center gap-2">

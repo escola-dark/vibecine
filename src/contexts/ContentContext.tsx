@@ -1,9 +1,9 @@
 import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
 import { CatalogState, ContentItem, Series } from '@/types/content';
 import { extractM3UTextFromZipBuffer, fetchAndParseM3U, fetchAndParseM3UZip, parseM3U } from '@/utils/m3u-parser';
+import { enrichCatalogLogosWithTMDB } from '@/utils/tmdb';
 import { doc, onSnapshot, setDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
-import { enrichCatalogLogos, sanitizeCatalogLogos } from '@/lib/tmdb';
 import { useAuth } from './AuthContext';
 
 interface ContentContextType {
@@ -63,14 +63,6 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
     });
   }, []);
 
-  const applyCatalogWithPosters = useCallback((nextCatalog: CatalogState) => {
-    const sanitizedCatalog = sanitizeCatalogLogos(nextCatalog);
-    applyCatalog(sanitizedCatalog);
-    void enrichCatalogLogos(sanitizedCatalog).then((enriched) => {
-      applyCatalog(enriched);
-    });
-  }, [applyCatalog]);
-
   // Keep catalog synced with shared admin M3U URL
   useEffect(() => {
     const configRef = doc(db, 'appConfig', 'catalog');
@@ -107,7 +99,8 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
         return false;
       }
 
-      applyCatalogWithPosters(result);
+      const enrichedCatalog = await enrichCatalogLogosWithTMDB(result);
+      applyCatalog(enrichedCatalog);
       setM3uUrl(url);
       localStorage.setItem('vibecines_m3u_url', url);
 
@@ -126,7 +119,7 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
     } finally {
       setIsLoading(false);
     }
-  }, [isAdmin, applyCatalogWithPosters]);
+  }, [isAdmin, applyCatalog]);
 
   const loadFromText = useCallback(async (text: string, persistShared = false) => {
     if (persistShared && !isAdmin) {
@@ -144,7 +137,8 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
         return false;
       }
 
-      applyCatalogWithPosters(result);
+      const enrichedCatalog = await enrichCatalogLogosWithTMDB(result);
+      applyCatalog(enrichedCatalog);
 
       if (persistShared) {
         await setDoc(doc(db, 'appConfig', 'catalog'), {
@@ -161,7 +155,7 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
     } finally {
       setIsLoading(false);
     }
-  }, [isAdmin, applyCatalogWithPosters]);
+  }, [isAdmin, applyCatalog]);
 
   const loadFromZipBuffer = useCallback(async (zipBuffer: ArrayBuffer, persistShared = false) => {
     if (persistShared && !isAdmin) {
@@ -180,7 +174,8 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
         return false;
       }
 
-      applyCatalogWithPosters(result);
+      const enrichedCatalog = await enrichCatalogLogosWithTMDB(result);
+      applyCatalog(enrichedCatalog);
 
       if (persistShared) {
         await setDoc(doc(db, 'appConfig', 'catalog'), {
@@ -197,7 +192,7 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
     } finally {
       setIsLoading(false);
     }
-  }, [isAdmin, applyCatalogWithPosters]);
+  }, [isAdmin, applyCatalog]);
 
   const loadFromLocalPlaylist = useCallback(async () => {
     for (const path of LOCAL_PLAYLIST_PATHS) {

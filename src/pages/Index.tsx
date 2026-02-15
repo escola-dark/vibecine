@@ -8,6 +8,18 @@ import { ContentItem } from '@/types/content';
 
 const YEAR_REGEX = /\b(?:19|20)\d{2}\b/g;
 const BRACKET_CONTENT_REGEX = /\[(?:[^\]]*)\]/g;
+const SERIES_PRIORITY_TARGETS = [
+  ['breaking bad'],
+  ['stranger things'],
+  ['prison break'],
+  ['reacher'],
+  ['os originais', 'the originals'],
+  ['narcos'],
+  ['la casa de papel', 'money heist'],
+  ['round 6', 'squid game'],
+  ['suits'],
+  ['origem', 'from'],
+] as const;
 
 function hasImage(logo?: string): boolean {
   return typeof logo === 'string' && logo.trim().length > 0;
@@ -24,6 +36,15 @@ function normalizeMovieKey(title: string): string {
     .toLowerCase()
     .replace(BRACKET_CONTENT_REGEX, ' ')
     .replace(/\b(4k|uhd|fhd|hd|dublado|dual\s*audio|legendado|l)\b/gi, ' ')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+function normalizeSeriesKey(title: string): string {
+  return title
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
     .replace(/[^a-z0-9]+/g, ' ')
     .trim();
 }
@@ -140,8 +161,25 @@ const Index = () => {
 
   const prioritizedSeries = useMemo(() => {
     const watchedIds = readWatchedIds();
+    const usedSeriesIds = new Set<string>();
 
-    return [...visibleSeries]
+    const preferredSeries = SERIES_PRIORITY_TARGETS
+      .map((aliases) => {
+        const normalizedAliases = aliases.map((alias) => normalizeSeriesKey(alias));
+        return visibleSeries.find((series) => {
+          if (usedSeriesIds.has(series.id)) return false;
+          const normalizedTitle = normalizeSeriesKey(series.title);
+          return normalizedAliases.some((alias) => normalizedTitle.includes(alias));
+        });
+      })
+      .filter((series): series is typeof catalog.series[number] => {
+        if (!series) return false;
+        if (usedSeriesIds.has(series.id)) return false;
+        usedSeriesIds.add(series.id);
+        return true;
+      });
+
+    const rankedSeries = [...visibleSeries]
       .map((series) => {
         const episodes = Object.values(series.seasons).flat();
         const watchedEpisodes = episodes.filter((ep) => watchedIds.has(ep.id)).length;
@@ -159,8 +197,10 @@ const Index = () => {
         };
       })
       .sort((a, b) => b.score - a.score || b.watchedEpisodes - a.watchedEpisodes || a.series.title.localeCompare(b.series.title, 'pt-BR'))
-      .slice(0, 20)
+      .filter(({ series }) => !usedSeriesIds.has(series.id))
       .map(({ series }) => series);
+
+    return [...preferredSeries, ...rankedSeries].slice(0, 20);
   }, [favorites, visibleSeries]);
 
   const { trending, recentMovies, favoriteMovies, moviesByGroupWithoutRepeats } = useMemo(() => {
