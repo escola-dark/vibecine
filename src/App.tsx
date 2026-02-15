@@ -25,6 +25,7 @@ function AppContent() {
   const location = useLocation();
 
   useEffect(() => {
+    window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
     if (location.pathname !== '/login') {
       saveLastRoute(`${location.pathname}${location.search}`);
     }

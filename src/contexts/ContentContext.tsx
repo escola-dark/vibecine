@@ -3,7 +3,7 @@ import { CatalogState, ContentItem, Series } from '@/types/content';
 import { extractM3UTextFromZipBuffer, fetchAndParseM3U, fetchAndParseM3UZip, parseM3U } from '@/utils/m3u-parser';
 import { doc, onSnapshot, setDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
-import { enrichCatalogSeriesLogos } from '@/lib/tmdb';
+import { enrichCatalogLogos, sanitizeCatalogLogos } from '@/lib/tmdb';
 import { useAuth } from './AuthContext';
 
 interface ContentContextType {
@@ -63,9 +63,10 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
     });
   }, []);
 
-  const applyCatalogWithSeriesPosters = useCallback((nextCatalog: CatalogState) => {
-    applyCatalog(nextCatalog);
-    void enrichCatalogSeriesLogos(nextCatalog).then((enriched) => {
+  const applyCatalogWithPosters = useCallback((nextCatalog: CatalogState) => {
+    const sanitizedCatalog = sanitizeCatalogLogos(nextCatalog);
+    applyCatalog(sanitizedCatalog);
+    void enrichCatalogLogos(sanitizedCatalog).then((enriched) => {
       applyCatalog(enriched);
     });
   }, [applyCatalog]);
@@ -106,7 +107,7 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
         return false;
       }
 
-      applyCatalogWithSeriesPosters(result);
+      applyCatalogWithPosters(result);
       setM3uUrl(url);
       localStorage.setItem('vibecines_m3u_url', url);
 
@@ -125,7 +126,7 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
     } finally {
       setIsLoading(false);
     }
-  }, [isAdmin, applyCatalogWithSeriesPosters]);
+  }, [isAdmin, applyCatalogWithPosters]);
 
   const loadFromText = useCallback(async (text: string, persistShared = false) => {
     if (persistShared && !isAdmin) {
@@ -143,7 +144,7 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
         return false;
       }
 
-      applyCatalogWithSeriesPosters(result);
+      applyCatalogWithPosters(result);
 
       if (persistShared) {
         await setDoc(doc(db, 'appConfig', 'catalog'), {
@@ -160,7 +161,7 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
     } finally {
       setIsLoading(false);
     }
-  }, [isAdmin, applyCatalogWithSeriesPosters]);
+  }, [isAdmin, applyCatalogWithPosters]);
 
   const loadFromZipBuffer = useCallback(async (zipBuffer: ArrayBuffer, persistShared = false) => {
     if (persistShared && !isAdmin) {
@@ -179,7 +180,7 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
         return false;
       }
 
-      applyCatalogWithSeriesPosters(result);
+      applyCatalogWithPosters(result);
 
       if (persistShared) {
         await setDoc(doc(db, 'appConfig', 'catalog'), {
@@ -196,7 +197,7 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
     } finally {
       setIsLoading(false);
     }
-  }, [isAdmin, applyCatalogWithSeriesPosters]);
+  }, [isAdmin, applyCatalogWithPosters]);
 
   const loadFromLocalPlaylist = useCallback(async () => {
     for (const path of LOCAL_PLAYLIST_PATHS) {
