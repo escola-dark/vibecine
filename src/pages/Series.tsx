@@ -1,10 +1,51 @@
 import { Search } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { ContentCard } from '@/components/ContentCard';
 import { ContentRow } from '@/components/ContentRow';
 import { useContent } from '@/contexts/ContentContext';
 import { useSearchParams } from 'react-router-dom';
 import { CatalogLoading } from '@/components/CatalogLoading';
+
+function sanitizeTitleForTMDB(title: string): string {
+  return title
+    .replace(/\[(?:[^\]]*)\]/g, ' ')
+    .replace(/\((?:[^)]*)\)/g, ' ')
+    .replace(/\bS\d{1,2}\s*E\d{1,3}\b/gi, ' ')
+    .replace(/\bT\d{1,2}\s*E\d{1,3}\b/gi, ' ')
+    .replace(/\b\d{1,2}x\d{1,3}\b/gi, ' ')
+    .replace(/\b(temporada|season|epis[oó]dio|episode|complete|completo)\b/gi, ' ')
+    .replace(/[\-–—|]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+async function fetchSeriesPoster(title: string, apiKey: string, signal: AbortSignal): Promise<string | null> {
+  const query = sanitizeTitleForTMDB(title) || title;
+  const params = new URLSearchParams({
+    api_key: apiKey,
+    language: 'pt-BR',
+    query,
+  });
+
+  const response = await fetch(`https://api.themoviedb.org/3/search/tv?${params.toString()}`, { signal });
+  if (!response.ok) return null;
+
+  const payload = await response.json() as { results?: Array<{ poster_path?: string | null }> };
+  const posterPath = payload.results?.find(item => item.poster_path)?.poster_path;
+  if (posterPath) return `https://image.tmdb.org/t/p/w500${posterPath}`;
+
+  const fallbackParams = new URLSearchParams({
+    api_key: apiKey,
+    language: 'en-US',
+    query,
+  });
+
+  const fallbackResponse = await fetch(`https://api.themoviedb.org/3/search/tv?${fallbackParams.toString()}`, { signal });
+  if (!fallbackResponse.ok) return null;
+  const fallbackPayload = await fallbackResponse.json() as { results?: Array<{ poster_path?: string | null }> };
+  const fallbackPosterPath = fallbackPayload.results?.find(item => item.poster_path)?.poster_path;
+  return fallbackPosterPath ? `https://image.tmdb.org/t/p/w500${fallbackPosterPath}` : null;
+}
 
 const SeriesPage = () => {
   const { catalog, isBootstrapping, isLoading } = useContent();
@@ -12,6 +53,7 @@ const SeriesPage = () => {
   const selectedCategory = params.get('cat');
   const [seriesSearch, setSeriesSearch] = useState('');
   const [categorySearch, setCategorySearch] = useState('');
+  const [tmdbSeriesPosters, setTmdbSeriesPosters] = useState<Record<string, string>>({});
 
   const seriesByGroupMap = useMemo(() => {
     const map = new Map<string, typeof catalog.series>();
@@ -24,7 +66,7 @@ const SeriesPage = () => {
 
   const seriesByGroup = useMemo(
     () => [...seriesByGroupMap.entries()].sort((a, b) => b[1].length - a[1].length),
-    [seriesByGroupMap]
+    [seriesByGroupMap],
   );
 
   const categorySeries = useMemo(() => {
@@ -45,6 +87,50 @@ const SeriesPage = () => {
       ] as const)
       .filter(([, series]) => series.length > 0);
   }, [seriesByGroup, categorySearch]);
+
+  const visibleSeries = useMemo(() => {
+    if (selectedCategory) return categorySeries.slice(0, 60);
+
+    const flattened = filteredGroups
+      .flatMap(([, series]) => series)
+      .slice(0, 120);
+
+    const unique = new Map(flattened.map(item => [item.id, item]));
+    return [...unique.values()];
+  }, [selectedCategory, categorySeries, filteredGroups]);
+
+  useEffect(() => {
+    const tmdbKey = import.meta.env.VITE_TMDB_API_KEY as string | undefined;
+    if (!tmdbKey || visibleSeries.length === 0) return;
+
+    const controller = new AbortController();
+
+    const loadSeriesPosters = async () => {
+      const targets = visibleSeries.slice(0, 80);
+
+      const fetched = await Promise.all(targets.map(async (series) => {
+        try {
+          const poster = await fetchSeriesPoster(series.title, tmdbKey, controller.signal);
+          return [series.id, poster || ''] as const;
+        } catch {
+          return [series.id, ''] as const;
+        }
+      }));
+
+      if (controller.signal.aborted) return;
+
+      setTmdbSeriesPosters(prev => {
+        const next = { ...prev };
+        fetched.forEach(([id, poster]) => {
+          if (poster) next[id] = poster;
+        });
+        return next;
+      });
+    };
+
+    void loadSeriesPosters();
+    return () => controller.abort();
+  }, [visibleSeries]);
 
   if (isBootstrapping || (isLoading && !catalog.isLoaded)) {
     return <CatalogLoading message="Atualizando catálogo" />;
@@ -78,7 +164,14 @@ const SeriesPage = () => {
 
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
             {categorySeries.map(series => (
-              <ContentCard key={series.id} id={series.id} title={series.title} logo={series.logo} group={series.group} type="series" />
+              <ContentCard
+                key={series.id}
+                id={series.id}
+                title={series.title}
+                logo={tmdbSeriesPosters[series.id] || series.logo}
+                group={series.group}
+                type="series"
+              />
             ))}
           </div>
         </div>
@@ -104,7 +197,7 @@ const SeriesPage = () => {
               items={series.map(item => ({
                 id: item.id,
                 title: item.title,
-                logo: item.logo,
+                logo: tmdbSeriesPosters[item.id] || item.logo,
                 group: item.group,
                 type: 'series' as const,
               }))}
