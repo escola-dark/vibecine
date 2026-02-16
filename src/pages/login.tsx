@@ -35,11 +35,11 @@ export default function LoginPage() {
     >
       <div className="absolute inset-0 bg-background/80" />
       <div className="relative z-10 w-full max-w-md rounded-xl border border-border bg-card p-6 shadow-card">
-        <h1 className="text-3xl font-bold text-primary mb-2 text-center" style={{ fontFamily: "'Bebas Neue', sans-serif" }}>
+        <h1 className="text-3xl font-bold text-primary mb-2" style={{ fontFamily: "'Bebas Neue', sans-serif" }}>
           VIBECINES
         </h1>
         <p className="text-sm text-muted-foreground mb-6">
-          Faça login para acessar o acervo de filmes e séries. 
+           Faça login para acessar o acervo de filmes e séries. 
         </p>
 
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -87,6 +87,4 @@ export default function LoginPage() {
       </div>
     </div>
   );
-
 }
-

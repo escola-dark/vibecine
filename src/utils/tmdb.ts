@@ -1,4 +1,4 @@
-import type { CatalogState, ContentItem, Series } from '@/types/content';
+﻿import type { CatalogState, ContentItem, Series } from '@/types/content';
 
 const TMDB_API_BASE = 'https://api.themoviedb.org/3';
 const TMDB_IMAGE_BASE = 'https://image.tmdb.org/t/p/w500';
