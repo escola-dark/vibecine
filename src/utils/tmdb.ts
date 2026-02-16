@@ -4,7 +4,6 @@ const TMDB_API_BASE = 'https://api.themoviedb.org/3';
 const TMDB_IMAGE_BASE = 'https://image.tmdb.org/t/p/w500';
 
 const apiKey = import.meta.env.VITE_TMDB_API_KEY as string | undefined;
-const posterCache = new Map<string, string | null>();
 
 function sanitizeTitle(title: string): string {
   return title
@@ -20,15 +19,8 @@ function sanitizeTitle(title: string): string {
     .trim();
 }
 
-function isValidLogoUrl(value?: string): boolean {
-  return Boolean(value && /^https?:\/\//i.test(value));
-}
-
 async function fetchPoster(query: string, type: 'movie' | 'tv'): Promise<string | null> {
   if (!apiKey || !query) return null;
-
-  const cacheKey = `${type}:${query.toLowerCase()}`;
-  if (posterCache.has(cacheKey)) return posterCache.get(cacheKey) ?? null;
 
   const params = new URLSearchParams({
     api_key: apiKey,
@@ -38,16 +30,11 @@ async function fetchPoster(query: string, type: 'movie' | 'tv'): Promise<string 
   });
 
   const response = await fetch(`${TMDB_API_BASE}/search/${type}?${params.toString()}`);
-  if (!response.ok) {
-    posterCache.set(cacheKey, null);
-    return null;
-  }
+  if (!response.ok) return null;
 
   const data = await response.json() as { results?: Array<{ poster_path?: string | null }> };
   const posterPath = data.results?.find(result => result.poster_path)?.poster_path;
-  const poster = posterPath ? `${TMDB_IMAGE_BASE}${posterPath}` : null;
-  posterCache.set(cacheKey, poster);
-  return poster;
+  return posterPath ? `${TMDB_IMAGE_BASE}${posterPath}` : null;
 }
 
 async function fetchPosterMap(titles: string[], type: 'movie' | 'tv'): Promise<Map<string, string>> {
@@ -59,67 +46,14 @@ async function fetchPosterMap(titles: string[], type: 'movie' | 'tv'): Promise<M
       const poster = await fetchPoster(title, type);
       if (poster) posterMap.set(title, poster);
     } catch {
-      // Ignore lookup failures and keep the existing catalog image.
+      // Ignore poster lookup failures and keep current logo from M3U
     }
   }));
 
   return posterMap;
 }
 
-export function clearTmdbPosterCache(): void {
-  posterCache.clear();
-}
-
-export function sanitizeCatalogLogos(catalog: CatalogState): CatalogState {
-  const movies: ContentItem[] = catalog.movies.map(movie => ({
-    ...movie,
-    logo: isValidLogoUrl(movie.logo) ? movie.logo : undefined,
-  }));
-
-  const series: Series[] = catalog.series.map(serie => {
-    const seasons = Object.fromEntries(
-      Object.entries(serie.seasons).map(([season, episodes]) => [
-        Number(season),
-        episodes.map(episode => ({
-          ...episode,
-          logo: undefined,
-        })),
-      ]),
-    );
-
-    return {
-      ...serie,
-      logo: isValidLogoUrl(serie.logo) ? serie.logo : undefined,
-      seasons,
-    };
-  });
-
-  const movieById = new Map(movies.map(movie => [movie.id, movie]));
-  const seriesEpisodeById = new Map<string, ContentItem>();
-  for (const serie of series) {
-    Object.values(serie.seasons).forEach(episodes => {
-      episodes.forEach(episode => {
-        seriesEpisodeById.set(episode.id, episode);
-      });
-    });
-  }
-
-  const allItems = catalog.allItems.map(item => {
-    if (item.type === 'movie') {
-      return movieById.get(item.id) ?? { ...item, logo: undefined };
-    }
-    return seriesEpisodeById.get(item.id) ?? { ...item, logo: undefined };
-  });
-
-  return {
-    ...catalog,
-    movies,
-    series,
-    allItems,
-  };
-}
-
-export async function enrichCatalogLogos(catalog: CatalogState): Promise<CatalogState> {
+export async function enrichCatalogLogosWithTMDB(catalog: CatalogState): Promise<CatalogState> {
   if (!apiKey) return catalog;
 
   try {
