@@ -1,247 +1,148 @@
-﻿import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { DashboardHero } from '@/components/DashboardHero';
 import { ContentRow } from '@/components/ContentRow';
 import { StatsBar } from '@/components/StatsBar';
 import { useContent } from '@/contexts/ContentContext';
 import { CatalogLoading } from '@/components/CatalogLoading';
-import { ContentItem } from '@/types/content';
 
-const YEAR_REGEX = /\b(?:19|20)\d{2}\b/g;
-const BRACKET_CONTENT_REGEX = /\[(?:[^\]]*)\]/g;
-const SERIES_PRIORITY_TARGETS = [
-  ['breaking bad'],
-  ['stranger things'],
-  ['prison break'],
-  ['reacher'],
-  ['os originais', 'the originals'],
-  ['narcos'],
-  ['la casa de papel', 'money heist'],
-  ['round 6', 'squid game'],
-  ['suits'],
-  ['origem', 'from'],
-] as const;
+const TMDB_SERIES_CACHE_KEY = 'vibecines_tmdb_series_posters_v1';
 
-function hasImage(logo?: string): boolean {
-  return typeof logo === 'string' && logo.trim().length > 0;
-}
+async function runConcurrently<T>(tasks: Array<() => Promise<T>>, limit: number): Promise<T[]> {
+  const results: T[] = [];
+  let index = 0;
 
-function extractYear(text: string): number | null {
-  const matches = text.match(YEAR_REGEX);
-  if (!matches?.length) return null;
-  return Math.max(...matches.map(Number));
-}
-
-function normalizeMovieKey(title: string): string {
-  return title
-    .toLowerCase()
-    .replace(BRACKET_CONTENT_REGEX, ' ')
-    .replace(/\b(4k|uhd|fhd|hd|dublado|dual\s*audio|legendado|l)\b/gi, ' ')
-    .replace(/[^a-z0-9]+/g, ' ')
-    .trim();
-}
-
-function normalizeSeriesKey(title: string): string {
-  return title
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, ' ')
-    .trim();
-}
-
-function movieVariantPriority(title: string): number {
-  const t = title.toLowerCase();
-  const has4k = /\b(4k|uhd)\b/.test(t);
-  const hasLegendado = /\[(?:\s*l\s*)\]|\blegendado\b/.test(t);
-  const hasOtherQualityTag = /\b(fhd|hd)\b/.test(t);
-
-  // Priority requested: normal first, then 4K, then other variants.
-  if (!hasLegendado && !has4k && !hasOtherQualityTag) return 3;
-  if (!hasLegendado && has4k) return 2;
-  if (!hasLegendado) return 1;
-  return 0;
-}
-
-function readWatchedIds(): Set<string> {
-  if (typeof window === 'undefined') return new Set<string>();
-
-  const watched = new Set<string>();
-  const keyPrefix = 'vibecines_watched_';
-
-  for (let i = 0; i < localStorage.length; i += 1) {
-    const key = localStorage.key(i);
-    if (!key || !key.startsWith(keyPrefix)) continue;
-    if (localStorage.getItem(key) === '1') {
-      watched.add(key.slice(keyPrefix.length));
+  const workers = Array.from({ length: Math.min(limit, tasks.length) }, async () => {
+    while (index < tasks.length) {
+      const taskIndex = index;
+      index += 1;
+      results[taskIndex] = await tasks[taskIndex]();
     }
-  }
+  });
 
-  return watched;
+  await Promise.all(workers);
+  return results;
 }
 
 const Index = () => {
   const { catalog, favorites, isBootstrapping, isLoading } = useContent();
+  const [tmdbSeriesPosters, setTmdbSeriesPosters] = useState<Record<string, string>>({});
 
-  const visibleMovies = useMemo(
-    () => catalog.movies.filter((movie) => hasImage(movie.logo)),
-    [catalog.movies],
-  );
+  const homeSeries = useMemo(() => catalog.series.slice(0, 20), [catalog.series]);
 
-  const visibleSeries = useMemo(
-    () => catalog.series.filter((series) => hasImage(series.logo)),
-    [catalog.series],
-  );
+  useEffect(() => {
+    const tmdbKey = import.meta.env.VITE_TMDB_API_KEY as string | undefined;
+    if (!tmdbKey || homeSeries.length === 0) return;
 
-  const uniqueMovies = useMemo(() => {
-    const watchedIds = readWatchedIds();
-    const map = new Map<string, ContentItem>();
+    const controller = new AbortController();
 
-    const scoreMovie = (movie: ContentItem) => {
-      const year = extractYear(`${movie.title} ${movie.group}`) ?? 0;
-      const variantBoost = movieVariantPriority(movie.title) * 1000;
-      const watchedBoost = watchedIds.has(movie.id) ? 250 : 0;
-      const favoriteBoost = favorites.has(movie.id) ? 180 : 0;
-      const recencyBoost = year >= 2015 ? Math.min(50, year - 2015) : 0;
-      const visualBoost = movie.logo ? 20 : 0;
-      return variantBoost + watchedBoost + favoriteBoost + recencyBoost + visualBoost;
+    const loadSeriesPosters = async () => {
+      let cachedPosters: Record<string, string> = {};
+      try {
+        const raw = localStorage.getItem(TMDB_SERIES_CACHE_KEY);
+        if (raw) cachedPosters = JSON.parse(raw) as Record<string, string>;
+      } catch {
+        cachedPosters = {};
+      }
+
+      if (Object.keys(cachedPosters).length > 0) {
+        setTmdbSeriesPosters(prev => ({ ...cachedPosters, ...prev }));
+      }
+
+      // Busca capas de todas as séries da seção principal para padronizar exibição somente via API.
+      const seriesToFetch = homeSeries.slice(0, 20);
+      const seriesMissingInCache = seriesToFetch.filter(series => !cachedPosters[series.id]);
+
+      if (seriesMissingInCache.length === 0) return;
+
+      const tasks = seriesMissingInCache.map(series => async () => {
+          const normalizedTitle = series.title.replace(/\b(s\d{1,2}e\d{1,3}|t\d{1,2}e\d{1,3}|\d{1,2}x\d{1,3})\b/gi, '').trim();
+          const params = new URLSearchParams({
+            api_key: tmdbKey,
+            language: 'pt-BR',
+            query: normalizedTitle || series.title,
+          });
+
+          try {
+            const response = await fetch(`https://api.themoviedb.org/3/search/tv?${params.toString()}`, {
+              signal: controller.signal,
+            });
+
+            if (!response.ok) return [series.id, ''] as const;
+
+            const payload = await response.json() as { results?: Array<{ poster_path?: string | null }> };
+            const posterPath = payload.results?.[0]?.poster_path;
+            if (posterPath) {
+              return [series.id, `https://image.tmdb.org/t/p/w500${posterPath}`] as const;
+            }
+
+            // Fallback sem language para aumentar chance de encontrar capa.
+            const fallbackParams = new URLSearchParams({
+              api_key: tmdbKey,
+              query: normalizedTitle || series.title,
+            });
+            const fallbackResponse = await fetch(`https://api.themoviedb.org/3/search/tv?${fallbackParams.toString()}`, {
+              signal: controller.signal,
+            });
+            if (!fallbackResponse.ok) return [series.id, ''] as const;
+            const fallbackPayload = await fallbackResponse.json() as { results?: Array<{ poster_path?: string | null }> };
+            const fallbackPosterPath = fallbackPayload.results?.[0]?.poster_path;
+            return [series.id, fallbackPosterPath ? `https://image.tmdb.org/t/p/w500${fallbackPosterPath}` : ''] as const;
+          } catch {
+            return [series.id, ''] as const;
+          }
+        });
+
+      const fetchedPosters = await runConcurrently(tasks, 4);
+
+      if (controller.signal.aborted) return;
+
+      setTmdbSeriesPosters(prev => {
+        const next = { ...prev };
+        fetchedPosters.forEach(([id, poster]) => {
+          if (poster) next[id] = poster;
+        });
+
+        try {
+          localStorage.setItem(TMDB_SERIES_CACHE_KEY, JSON.stringify(next));
+        } catch {
+          // Ignore storage quota/read-only failures.
+        }
+
+        return next;
+      });
     };
 
-    visibleMovies.forEach((movie) => {
-      const key = normalizeMovieKey(movie.title) || movie.id;
-      const current = map.get(key);
-      if (!current || scoreMovie(movie) > scoreMovie(current)) {
-        map.set(key, movie);
-      }
-    });
+    void loadSeriesPosters();
 
-    return [...map.values()];
-  }, [favorites, visibleMovies]);
+    return () => controller.abort();
+  }, [homeSeries]);
 
   const moviesByGroup = useMemo(() => {
-    const map = new Map<string, ContentItem[]>();
-    uniqueMovies.forEach((m) => {
+    const map = new Map<string, typeof catalog.movies>();
+    catalog.movies.forEach(m => {
       if (!map.has(m.group)) map.set(m.group, []);
       map.get(m.group)!.push(m);
     });
     return [...map.entries()].sort((a, b) => b[1].length - a[1].length);
-  }, [uniqueMovies]);
+  }, [catalog.movies]);
 
-  const trendingCandidates = useMemo(() => {
-    const watchedIds = readWatchedIds();
+  const trending = useMemo(() => {
+    return [...catalog.movies].sort(() => Math.random() - 0.5).slice(0, 20);
+  }, [catalog.movies]);
 
-    const from2015 = uniqueMovies.filter((movie) => {
-      const year = extractYear(`${movie.title} ${movie.group}`);
-      return year !== null && year >= 2015;
-    });
-
-    const source = from2015.length > 0 ? from2015 : uniqueMovies;
-
-    return [...source]
-      .map((movie) => {
-        const year = extractYear(`${movie.title} ${movie.group}`) ?? 0;
-        const watchedBoost = watchedIds.has(movie.id) ? 120 : 0;
-        const favoriteBoost = favorites.has(movie.id) ? 80 : 0;
-        const recencyBoost = year >= 2015 ? Math.min(40, (year - 2015) * 2) : 0;
-        const visualBoost = movie.logo ? 10 : 0;
-
-        return {
-          movie,
-          year,
-          score: watchedBoost + favoriteBoost + recencyBoost + visualBoost,
-        };
-      })
-      .sort((a, b) => b.score - a.score || b.year - a.year || a.movie.title.localeCompare(b.movie.title, 'pt-BR'))
-      .map(({ movie }) => movie);
-  }, [favorites, uniqueMovies]);
-
-  const recentCandidates = useMemo(() => {
-    const uniqueById = new Set(uniqueMovies.map((movie) => movie.id));
-    return [...visibleMovies].reverse().filter((movie) => uniqueById.has(movie.id));
-  }, [uniqueMovies, visibleMovies]);
-
-  const prioritizedSeries = useMemo(() => {
-    const watchedIds = readWatchedIds();
-    const usedSeriesIds = new Set<string>();
-
-    const preferredSeries = SERIES_PRIORITY_TARGETS
-      .map((aliases) => {
-        const normalizedAliases = aliases.map((alias) => normalizeSeriesKey(alias));
-        return visibleSeries.find((series) => {
-          if (usedSeriesIds.has(series.id)) return false;
-          const normalizedTitle = normalizeSeriesKey(series.title);
-          return normalizedAliases.some((alias) => normalizedTitle.includes(alias));
-        });
-      })
-      .filter((series): series is typeof catalog.series[number] => {
-        if (!series) return false;
-        if (usedSeriesIds.has(series.id)) return false;
-        usedSeriesIds.add(series.id);
-        return true;
-      });
-
-    const rankedSeries = [...visibleSeries]
-      .map((series) => {
-        const episodes = Object.values(series.seasons).flat();
-        const watchedEpisodes = episodes.filter((ep) => watchedIds.has(ep.id)).length;
-        const favoriteBoost = favorites.has(series.id) ? 70 : 0;
-        const watchBoost = watchedEpisodes * 100;
-        const depthBoost = Math.min(40, episodes.length);
-        const visualBoost = series.logo ? 10 : 0;
-        const year = extractYear(`${series.title} ${series.group}`) ?? 0;
-        const recencyBoost = year >= 2015 ? Math.min(20, year - 2015) : 0;
-
-        return {
-          series,
-          score: watchBoost + favoriteBoost + depthBoost + visualBoost + recencyBoost,
-          watchedEpisodes,
-        };
-      })
-      .sort((a, b) => b.score - a.score || b.watchedEpisodes - a.watchedEpisodes || a.series.title.localeCompare(b.series.title, 'pt-BR'))
-      .filter(({ series }) => !usedSeriesIds.has(series.id))
-      .map(({ series }) => series);
-
-    return [...preferredSeries, ...rankedSeries].slice(0, 20);
-  }, [favorites, visibleSeries]);
-
-  const { trending, recentMovies, favoriteMovies, moviesByGroupWithoutRepeats } = useMemo(() => {
-    const usedMovieIds = new Set<string>();
-
-    const takeUnique = (movies: ContentItem[], limit: number) => {
-      const selected: ContentItem[] = [];
-      for (const movie of movies) {
-        if (usedMovieIds.has(movie.id)) continue;
-        usedMovieIds.add(movie.id);
-        selected.push(movie);
-        if (selected.length >= limit) break;
-      }
-      return selected;
-    };
-
-    const trendingList = takeUnique(trendingCandidates, 20);
-    const recentList = takeUnique(recentCandidates, 20);
-    const favoriteList = takeUnique(uniqueMovies.filter((movie) => favorites.has(movie.id)), 20);
-    const grouped = moviesByGroup
-      .map(([group, movies]) => [group, takeUnique(movies, 20)] as const)
-      .filter(([, movies]) => movies.length > 0);
-
-    return {
-      trending: trendingList,
-      recentMovies: recentList,
-      favoriteMovies: favoriteList,
-      moviesByGroupWithoutRepeats: grouped,
-    };
-  }, [favorites, moviesByGroup, recentCandidates, trendingCandidates, uniqueMovies]);
+  const recentMovies = useMemo(() => catalog.movies.slice(-20).reverse(), [catalog.movies]);
 
   const favItems = useMemo(() => {
-    const favSeries = visibleSeries.filter((s) => favorites.has(s.id)).slice(0, 20);
+    const favMovies = catalog.movies.filter(m => favorites.has(m.id)).slice(0, 20);
+    const favSeries = catalog.series.filter(s => favorites.has(s.id)).slice(0, 20);
     return [
-      ...favoriteMovies.map((m) => ({ ...m, type: 'movie' as const })),
-      ...favSeries.map((s) => ({ id: s.id, title: s.title, logo: s.logo, group: s.group, type: 'series' as const })),
+      ...favMovies.map(m => ({ ...m, type: 'movie' as const })),
+      ...favSeries.map(s => ({ id: s.id, title: s.title, logo: s.logo, group: s.group, type: 'series' as const })),
     ];
-  }, [favoriteMovies, favorites, visibleSeries]);
+  }, [catalog, favorites]);
 
   if (isBootstrapping || (isLoading && !catalog.isLoaded)) {
-    return <CatalogLoading message={'Atualizando cat\u00E1logo'} />;
+    return <CatalogLoading message="Atualizando catálogo" />;
   }
 
   return (
@@ -255,24 +156,30 @@ const Index = () => {
               Dashboard
             </h1>
             <p className="text-muted-foreground mt-2 text-sm md:text-base">
-              {'Fa\u00E7a a importa\u00E7\u00E3o da sua lista M3U pelo menu para come\u00E7ar a preencher o cat\u00E1logo.'}
+              Faça a importação da sua lista M3U pelo menu para começar a preencher o catálogo.
             </p>
           </div>
         </div>
       )}
 
-      <div className="mt-4 md:mt-6 space-y-5 md:space-y-6 lg:pl-6">
+      <div className="mt-4 md:mt-6 space-y-5 md:space-y-6">
         {catalog.isLoaded && <StatsBar />}
 
         <ContentRow
-          title={'\uD83D\uDD25 Em Alta'}
-          items={trending.map((m) => ({ ...m, type: 'movie' as const }))}
+          title="🔥 Em Alta"
+          items={trending.map(m => ({ ...m, type: 'movie' as const }))}
         />
 
-        {prioritizedSeries.length > 0 && (
+        {catalog.series.length > 0 && (
           <ContentRow
-            title={'\uD83D\uDCFA S\u00E9ries'}
-            items={prioritizedSeries.map((s) => ({ id: s.id, title: s.title, logo: s.logo, group: s.group, type: 'series' as const }))}
+            title="📺 Séries"
+            items={homeSeries.map(s => ({
+              id: s.id,
+              title: s.title,
+              logo: tmdbSeriesPosters[s.id],
+              group: s.group,
+              type: 'series' as const,
+            }))}
             seeAllTo="/series"
             limit={10}
             showEndCard
@@ -281,14 +188,14 @@ const Index = () => {
 
         {recentMovies.length > 0 && (
           <ContentRow
-            title={'\u2728 Adicionados Recentemente'}
-            items={recentMovies.map((m) => ({ ...m, type: 'movie' as const }))}
+            title="✨ Adicionados Recentemente"
+            items={recentMovies.map(m => ({ ...m, type: 'movie' as const }))}
           />
         )}
 
         {favItems.length > 0 && (
           <ContentRow
-            title={'\u2764\uFE0F Seus Favoritos'}
+            title="❤️ Seus Favoritos"
             items={favItems}
             limit={10}
             seeAllTo="/favorites"
@@ -296,11 +203,11 @@ const Index = () => {
           />
         )}
 
-        {moviesByGroupWithoutRepeats.slice(0, 10).map(([group, movies]) => (
+        {moviesByGroup.slice(0, 10).map(([group, movies]) => (
           <ContentRow
             key={group}
             title={group}
-            items={movies.slice(0, 20).map((m) => ({ ...m, type: 'movie' as const }))}
+            items={movies.slice(0, 20).map(m => ({ ...m, type: 'movie' as const }))}
             seeAllTo={`/movies?cat=${encodeURIComponent(group)}`}
             limit={12}
             showEndCard
