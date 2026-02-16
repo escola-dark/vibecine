@@ -55,20 +55,27 @@ const Index = () => {
     return [...prioritized, ...remaining].slice(0, 20);
   }, [catalog.series]);
 
+
+  const favoriteSeries = useMemo(
+    () => catalog.series.filter(s => favorites.has(s.id)).slice(0, 20),
+    [catalog.series, favorites],
+  );
+
   useEffect(() => {
     const tmdbKey = import.meta.env.VITE_TMDB_API_KEY as string | undefined;
-    if (!tmdbKey || homeSeries.length === 0) return;
+    const seriesTargets = [...homeSeries, ...favoriteSeries];
+    if (!tmdbKey || seriesTargets.length === 0) return;
 
     const controller = new AbortController();
 
     const loadSeriesPosters = async () => {
       // Busca capas apenas das séries da seção principal (não altera cards de filmes).
-      const seriesToFetch = homeSeries.slice(0, 20);
+      const uniqueSeriesToFetch = [...new Map(seriesTargets.map(s => [s.id, s])).values()].slice(0, 40);
 
-      if (seriesToFetch.length === 0) return;
+      if (uniqueSeriesToFetch.length === 0) return;
 
       const fetchedPosters = await Promise.all(
-        seriesToFetch.map(async series => {
+        uniqueSeriesToFetch.map(async series => {
           const normalizedTitle = series.title.replace(/\b(s\d{1,2}e\d{1,3}|t\d{1,2}e\d{1,3}|\d{1,2}x\d{1,3})\b/gi, '').trim();
           const params = new URLSearchParams({
             api_key: tmdbKey,
@@ -106,7 +113,7 @@ const Index = () => {
     void loadSeriesPosters();
 
     return () => controller.abort();
-  }, [homeSeries]);
+  }, [homeSeries, favoriteSeries]);
 
   const moviesByGroup = useMemo(() => {
     const map = new Map<string, typeof catalog.movies>();
@@ -125,12 +132,17 @@ const Index = () => {
 
   const favItems = useMemo(() => {
     const favMovies = catalog.movies.filter(m => favorites.has(m.id)).slice(0, 20);
-    const favSeries = catalog.series.filter(s => favorites.has(s.id)).slice(0, 20);
     return [
       ...favMovies.map(m => ({ ...m, type: 'movie' as const })),
-      ...favSeries.map(s => ({ id: s.id, title: s.title, logo: s.logo, group: s.group, type: 'series' as const })),
+      ...favoriteSeries.map(s => ({
+        id: s.id,
+        title: s.title,
+        logo: tmdbSeriesPosters[s.id] || s.logo,
+        group: s.group,
+        type: 'series' as const,
+      })),
     ];
-  }, [catalog, favorites]);
+  }, [catalog.movies, favorites, favoriteSeries, tmdbSeriesPosters]);
 
   if (isBootstrapping || (isLoading && !catalog.isLoaded)) {
     return <CatalogLoading message="Atualizando catálogo" />;
