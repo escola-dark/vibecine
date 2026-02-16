@@ -1,9 +1,9 @@
 import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
 import { CatalogState, ContentItem, Series } from '@/types/content';
 import { extractM3UTextFromZipBuffer, fetchAndParseM3U, fetchAndParseM3UZip, parseM3U } from '@/utils/m3u-parser';
+import { enrichCatalogLogosWithTMDB } from '@/utils/tmdb';
 import { doc, onSnapshot, setDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
-import { clearTmdbPosterCache, enrichCatalogLogos, sanitizeCatalogLogos } from '@/utils/tmdb';
 import { useAuth } from './AuthContext';
 
 interface ContentContextType {
@@ -25,16 +25,6 @@ interface ContentContextType {
 
 const ContentContext = createContext<ContentContextType | null>(null);
 const LOCAL_PLAYLIST_PATHS = ['/playlist.zip', '/assets/playlist.zip', '/playlist.m3u', '/assets/playlist.m3u'];
-
-function isCatalogState(value: unknown): value is CatalogState {
-  if (!value || typeof value !== 'object') return false;
-  const input = value as Partial<CatalogState>;
-  return Array.isArray(input.movies)
-    && Array.isArray(input.series)
-    && Array.isArray(input.allItems)
-    && Array.isArray(input.groups)
-    && typeof input.isLoaded === 'boolean';
-}
 
 export function ContentProvider({ children }: { children: React.ReactNode }) {
   const { isAdmin } = useAuth();
@@ -73,16 +63,24 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
     });
   }, []);
 
-  const applyCatalogWithPosters = useCallback(async (nextCatalog: CatalogState) => {
-    clearTmdbPosterCache();
-    const sanitizedCatalog = sanitizeCatalogLogos(nextCatalog);
-    applyCatalog(sanitizedCatalog);
+  // Keep catalog synced with shared admin M3U URL
+  useEffect(() => {
+    const configRef = doc(db, 'appConfig', 'catalog');
+    const unsubscribe = onSnapshot(configRef, snapshot => {
+      const data = snapshot.data();
+      const sharedText = (data?.m3uContent as string | undefined)?.trim();
+      const sharedUrl = (data?.m3uUrl as string | undefined)?.trim();
+      if (sharedText) {
+        void loadFromText(sharedText, false);
+        return;
+      }
+      if (!sharedUrl) return;
+      if (sharedUrl === m3uUrl && catalog.isLoaded) return;
+      void loadFromUrl(sharedUrl, false);
+    });
 
-    const enrichedCatalog = await enrichCatalogLogos(sanitizedCatalog);
-    applyCatalog(enrichedCatalog);
-
-    return enrichedCatalog;
-  }, [applyCatalog]);
+    return () => unsubscribe();
+  }, [m3uUrl, catalog.isLoaded]);
 
   const loadFromUrl = useCallback(async (url: string, persistShared = false) => {
     if (persistShared && !isAdmin) {
@@ -101,7 +99,8 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
         return false;
       }
 
-      const enrichedCatalog = await applyCatalogWithPosters(result);
+      const enrichedCatalog = await enrichCatalogLogosWithTMDB(result);
+      applyCatalog(enrichedCatalog);
       setM3uUrl(url);
       localStorage.setItem('vibecines_m3u_url', url);
 
@@ -109,7 +108,6 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
         await setDoc(doc(db, 'appConfig', 'catalog'), {
           m3uUrl: url,
           m3uContent: null,
-          catalogSnapshot: enrichedCatalog,
           updatedAt: Date.now(),
         }, { merge: true });
       }
@@ -121,7 +119,7 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
     } finally {
       setIsLoading(false);
     }
-  }, [isAdmin, applyCatalogWithPosters]);
+  }, [isAdmin, applyCatalog]);
 
   const loadFromText = useCallback(async (text: string, persistShared = false) => {
     if (persistShared && !isAdmin) {
@@ -139,13 +137,13 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
         return false;
       }
 
-      const enrichedCatalog = await applyCatalogWithPosters(result);
+      const enrichedCatalog = await enrichCatalogLogosWithTMDB(result);
+      applyCatalog(enrichedCatalog);
 
       if (persistShared) {
         await setDoc(doc(db, 'appConfig', 'catalog'), {
           m3uContent: text,
           m3uUrl: null,
-          catalogSnapshot: enrichedCatalog,
           updatedAt: Date.now(),
         }, { merge: true });
       }
@@ -157,7 +155,7 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
     } finally {
       setIsLoading(false);
     }
-  }, [isAdmin, applyCatalogWithPosters]);
+  }, [isAdmin, applyCatalog]);
 
   const loadFromZipBuffer = useCallback(async (zipBuffer: ArrayBuffer, persistShared = false) => {
     if (persistShared && !isAdmin) {
@@ -176,13 +174,13 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
         return false;
       }
 
-      const enrichedCatalog = await applyCatalogWithPosters(result);
+      const enrichedCatalog = await enrichCatalogLogosWithTMDB(result);
+      applyCatalog(enrichedCatalog);
 
       if (persistShared) {
         await setDoc(doc(db, 'appConfig', 'catalog'), {
           m3uContent: text,
           m3uUrl: null,
-          catalogSnapshot: enrichedCatalog,
           updatedAt: Date.now(),
         }, { merge: true });
       }
@@ -194,7 +192,7 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
     } finally {
       setIsLoading(false);
     }
-  }, [isAdmin, applyCatalogWithPosters]);
+  }, [isAdmin, applyCatalog]);
 
   const loadFromLocalPlaylist = useCallback(async () => {
     for (const path of LOCAL_PLAYLIST_PATHS) {
@@ -203,32 +201,6 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
     }
     return false;
   }, [loadFromUrl]);
-
-  // Keep catalog synced with shared admin M3U URL
-  useEffect(() => {
-    const configRef = doc(db, 'appConfig', 'catalog');
-    const unsubscribe = onSnapshot(configRef, snapshot => {
-      const data = snapshot.data();
-      const sharedSnapshot = data?.catalogSnapshot as unknown;
-      const sharedText = (data?.m3uContent as string | undefined)?.trim();
-      const sharedUrl = (data?.m3uUrl as string | undefined)?.trim();
-
-      if (isCatalogState(sharedSnapshot) && sharedSnapshot.isLoaded) {
-        applyCatalog(sharedSnapshot);
-        return;
-      }
-
-      if (sharedText) {
-        void loadFromText(sharedText, false);
-        return;
-      }
-      if (!sharedUrl) return;
-      if (sharedUrl === m3uUrl && catalog.isLoaded) return;
-      void loadFromUrl(sharedUrl, false);
-    });
-
-    return () => unsubscribe();
-  }, [m3uUrl, catalog.isLoaded, applyCatalog, loadFromText, loadFromUrl]);
 
   // Auto-load last URL saved on this device or local bundled playlist
   useEffect(() => {
