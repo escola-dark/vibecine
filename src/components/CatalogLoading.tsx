@@ -1,10 +1,26 @@
+import { useEffect, useState } from 'react';
 import { Loader2 } from 'lucide-react';
 
 interface CatalogLoadingProps {
   message?: string;
 }
 
-export function CatalogLoading({ message = 'Atualizando catálogo' }: CatalogLoadingProps) {
+const LOADING_TEXTS = [
+  'Atualizando os filmes...',
+  'Atualizando as séries...',
+] as const;
+
+export function CatalogLoading(_: CatalogLoadingProps) {
+  const [textIndex, setTextIndex] = useState(0);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setTextIndex(prev => (prev + 1) % LOADING_TEXTS.length);
+    }, 1800);
+
+    return () => window.clearInterval(timer);
+  }, []);
+
   return (
     <div className="px-4 md:px-6 py-8 md:py-12">
       <div className="rounded-2xl border border-border bg-card/70 p-8 md:p-12 text-center">
@@ -15,10 +31,13 @@ export function CatalogLoading({ message = 'Atualizando catálogo' }: CatalogLoa
           className="text-3xl md:text-4xl font-bold text-foreground"
           style={{ fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '0.05em' }}
         >
-          {message}
+          Aguarde
         </h2>
-        <p className="mt-2 text-sm md:text-base text-muted-foreground">
-          Atualizando os filmes & séries...
+        <p
+          key={textIndex}
+          className="mt-2 text-sm md:text-base text-muted-foreground animate-in fade-in duration-500"
+        >
+          {LOADING_TEXTS[textIndex]}
         </p>
       </div>
     </div>
