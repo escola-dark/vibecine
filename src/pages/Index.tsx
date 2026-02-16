@@ -1,33 +1,59 @@
-﻿import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { DashboardHero } from '@/components/DashboardHero';
 import { ContentRow } from '@/components/ContentRow';
 import { StatsBar } from '@/components/StatsBar';
 import { useContent } from '@/contexts/ContentContext';
 import { CatalogLoading } from '@/components/CatalogLoading';
 
-const TMDB_SERIES_CACHE_KEY = 'vibecines_tmdb_series_posters_v1';
+const SERIES_PRIORITY_TARGETS = [
+  ['breaking bad'],
+  ['la casa de papel', 'money heist'],
+  ['reacher'],
+  ['dark'],
+  ['ozark'],
+  ['stranger things'],
+  ['narcos'],
+  ['peaky blinders'],
+  ['os originais', 'the originals'],
+  ['mr robot', 'mr. robot'],
+  ['arcanjo renegado'],
+] as const;
 
-async function runConcurrently<T>(tasks: Array<() => Promise<T>>, limit: number): Promise<T[]> {
-  const results: T[] = [];
-  let index = 0;
-
-  const workers = Array.from({ length: Math.min(limit, tasks.length) }, async () => {
-    while (index < tasks.length) {
-      const taskIndex = index;
-      index += 1;
-      results[taskIndex] = await tasks[taskIndex]();
-    }
-  });
-
-  await Promise.all(workers);
-  return results;
+function normalizeSeriesTitle(title: string): string {
+  return title
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
 }
 
 const Index = () => {
   const { catalog, favorites, isBootstrapping, isLoading } = useContent();
   const [tmdbSeriesPosters, setTmdbSeriesPosters] = useState<Record<string, string>>({});
 
-  const homeSeries = useMemo(() => catalog.series.slice(0, 20), [catalog.series]);
+  const homeSeries = useMemo(() => {
+    const usedIds = new Set<string>();
+
+    const prioritized = SERIES_PRIORITY_TARGETS
+      .map((aliases) => {
+        const normalizedAliases = aliases.map(normalizeSeriesTitle);
+        return catalog.series.find((series) => {
+          if (usedIds.has(series.id)) return false;
+          const normalizedTitle = normalizeSeriesTitle(series.title);
+          return normalizedAliases.some((alias) => normalizedTitle.includes(alias));
+        });
+      })
+      .filter((series): series is typeof catalog.series[number] => {
+        if (!series) return false;
+        if (usedIds.has(series.id)) return false;
+        usedIds.add(series.id);
+        return true;
+      });
+
+    const remaining = catalog.series.filter((series) => !usedIds.has(series.id));
+    return [...prioritized, ...remaining].slice(0, 20);
+  }, [catalog.series]);
 
   useEffect(() => {
     const tmdbKey = import.meta.env.VITE_TMDB_API_KEY as string | undefined;
@@ -36,25 +62,15 @@ const Index = () => {
     const controller = new AbortController();
 
     const loadSeriesPosters = async () => {
-      let cachedPosters: Record<string, string> = {};
-      try {
-        const raw = localStorage.getItem(TMDB_SERIES_CACHE_KEY);
-        if (raw) cachedPosters = JSON.parse(raw) as Record<string, string>;
-      } catch {
-        cachedPosters = {};
-      }
+      // Busca capas apenas das séries da seção principal (não altera cards de filmes).
+      const missingPosters = homeSeries
+        .filter(series => !series.logo)
+        .slice(0, 15);
 
-      if (Object.keys(cachedPosters).length > 0) {
-        setTmdbSeriesPosters(prev => ({ ...cachedPosters, ...prev }));
-      }
+      if (missingPosters.length === 0) return;
 
-      // Busca capas de todas as séries da seção principal para padronizar exibição somente via API.
-      const seriesToFetch = homeSeries.slice(0, 20);
-      const seriesMissingInCache = seriesToFetch.filter(series => !cachedPosters[series.id]);
-
-      if (seriesMissingInCache.length === 0) return;
-
-      const tasks = seriesMissingInCache.map(series => async () => {
+      const fetchedPosters = await Promise.all(
+        missingPosters.map(async series => {
           const normalizedTitle = series.title.replace(/\b(s\d{1,2}e\d{1,3}|t\d{1,2}e\d{1,3}|\d{1,2}x\d{1,3})\b/gi, '').trim();
           const params = new URLSearchParams({
             api_key: tmdbKey,
@@ -71,28 +87,12 @@ const Index = () => {
 
             const payload = await response.json() as { results?: Array<{ poster_path?: string | null }> };
             const posterPath = payload.results?.[0]?.poster_path;
-            if (posterPath) {
-              return [series.id, `https://image.tmdb.org/t/p/w500${posterPath}`] as const;
-            }
-
-            // Fallback sem language para aumentar chance de encontrar capa.
-            const fallbackParams = new URLSearchParams({
-              api_key: tmdbKey,
-              query: normalizedTitle || series.title,
-            });
-            const fallbackResponse = await fetch(`https://api.themoviedb.org/3/search/tv?${fallbackParams.toString()}`, {
-              signal: controller.signal,
-            });
-            if (!fallbackResponse.ok) return [series.id, ''] as const;
-            const fallbackPayload = await fallbackResponse.json() as { results?: Array<{ poster_path?: string | null }> };
-            const fallbackPosterPath = fallbackPayload.results?.[0]?.poster_path;
-            return [series.id, fallbackPosterPath ? `https://image.tmdb.org/t/p/w500${fallbackPosterPath}` : ''] as const;
+            return [series.id, posterPath ? `https://image.tmdb.org/t/p/w500${posterPath}` : ''] as const;
           } catch {
             return [series.id, ''] as const;
           }
-        });
-
-      const fetchedPosters = await runConcurrently(tasks, 4);
+        }),
+      );
 
       if (controller.signal.aborted) return;
 
@@ -101,13 +101,6 @@ const Index = () => {
         fetchedPosters.forEach(([id, poster]) => {
           if (poster) next[id] = poster;
         });
-
-        try {
-          localStorage.setItem(TMDB_SERIES_CACHE_KEY, JSON.stringify(next));
-        } catch {
-          // Ignore storage quota/read-only failures.
-        }
-
         return next;
       });
     };
@@ -176,12 +169,12 @@ const Index = () => {
             items={homeSeries.map(s => ({
               id: s.id,
               title: s.title,
-              logo: tmdbSeriesPosters[s.id],
+              logo: s.logo || tmdbSeriesPosters[s.id],
               group: s.group,
               type: 'series' as const,
             }))}
             seeAllTo="/series"
-            limit={10}
+            limit={11}
             showEndCard
           />
         )}
