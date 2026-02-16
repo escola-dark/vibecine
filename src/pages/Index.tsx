@@ -63,14 +63,12 @@ const Index = () => {
 
     const loadSeriesPosters = async () => {
       // Busca capas apenas das séries da seção principal (não altera cards de filmes).
-      const missingPosters = homeSeries
-        .filter(series => !series.logo)
-        .slice(0, 15);
+      const seriesToFetch = homeSeries.slice(0, 20);
 
-      if (missingPosters.length === 0) return;
+      if (seriesToFetch.length === 0) return;
 
       const fetchedPosters = await Promise.all(
-        missingPosters.map(async series => {
+        seriesToFetch.map(async series => {
           const normalizedTitle = series.title.replace(/\b(s\d{1,2}e\d{1,3}|t\d{1,2}e\d{1,3}|\d{1,2}x\d{1,3})\b/gi, '').trim();
           const params = new URLSearchParams({
             api_key: tmdbKey,
@@ -169,7 +167,7 @@ const Index = () => {
             items={homeSeries.map(s => ({
               id: s.id,
               title: s.title,
-              logo: s.logo || tmdbSeriesPosters[s.id],
+              logo: tmdbSeriesPosters[s.id] || s.logo,
               group: s.group,
               type: 'series' as const,
             }))}
